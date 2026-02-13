@@ -1,0 +1,32 @@
+# macOS
+.DS_Store
+._*
+
+# Xcode
+DerivedData/
+xcuserdata/
+*.xcscmblueprint
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.build/
+Packages/*/.build/
+.swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
+
+# Secrets — never commit these
+*.p12
+*.mobileprovision
+*.pem
+!Packages/SpecttyTerminal/Sources/CGhosttyVT/include/**
+
+# Vendor binaries (built separately)
+Vendor/libghostty-vt/*.a
+Vendor/libghostty-vt/*.dylib
+
+# Misc
+*.log
+*.tmp

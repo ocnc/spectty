@@ -1,0 +1,60 @@
+excluded:
+  - Packages/*/.build
+  - DerivedData
+  - Vendor
+
+disabled_rules:
+  - trailing_comma
+  - opening_brace
+  - todo
+
+opt_in_rules:
+  - empty_count
+  - closure_spacing
+  - contains_over_first_not_nil
+  - fatal_error_message
+  - first_where
+  - implicitly_unwrapped_optional
+  - overridden_super_call
+  - private_action
+  - private_outlet
+  - sorted_first_last
+  - toggle_bool
+  - unneeded_parentheses_in_closure_argument
+  - vertical_parameter_alignment_on_call
+
+line_length:
+  warning: 140
+  error: 200
+  ignores_urls: true
+  ignores_comments: true
+
+type_body_length:
+  warning: 500
+  error: 800
+
+file_length:
+  warning: 600
+  error: 1000
+
+function_body_length:
+  warning: 80
+  error: 150
+
+identifier_name:
+  min_length:
+    warning: 1
+  excluded:
+    - i
+    - x
+    - y
+    - r
+    - g
+    - b
+    - s
+    - n
+    - p
+
+nesting:
+  type_level: 3
+  function_level: 3
