@@ -1,0 +1,63 @@
+import Foundation
+import SpecttyTransport
+
+/// Manages active terminal sessions.
+@Observable
+@MainActor
+final class SessionManager {
+    private(set) var sessions: [TerminalSession] = []
+    var activeSessionID: UUID?
+
+    var activeSession: TerminalSession? {
+        sessions.first { $0.id == activeSessionID }
+    }
+
+    /// Create and start a new session for a server connection.
+    func connect(to connection: ServerConnection) async throws -> TerminalSession {
+        let config = SSHConnectionConfig(
+            host: connection.host,
+            port: connection.port,
+            username: connection.username,
+            authMethod: .password("") // TODO: Retrieve from keychain
+        )
+
+        let transport: any TerminalTransport
+
+        switch connection.transport {
+        case .ssh:
+            transport = SSHTransport(config: config)
+        case .mosh:
+            transport = MoshTransport()
+        }
+
+        let session = TerminalSession(
+            connectionName: connection.name.isEmpty ? connection.host : connection.name,
+            transport: transport
+        )
+
+        sessions.append(session)
+        activeSessionID = session.id
+
+        try await session.start()
+
+        return session
+    }
+
+    /// Disconnect and remove a session.
+    func disconnect(_ session: TerminalSession) {
+        session.stop()
+        sessions.removeAll { $0.id == session.id }
+        if activeSessionID == session.id {
+            activeSessionID = sessions.last?.id
+        }
+    }
+
+    /// Disconnect all sessions.
+    func disconnectAll() {
+        for session in sessions {
+            session.stop()
+        }
+        sessions.removeAll()
+        activeSessionID = nil
+    }
+}

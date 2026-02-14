@@ -6,6 +6,13 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		A0000001AAAA000000000001 /* SpecttyTerminal in Frameworks */ = {isa = PBXBuildFile; productRef = A0000002AAAA000000000001 /* SpecttyTerminal */; };
+		A0000001AAAA000000000002 /* SpecttyTransport in Frameworks */ = {isa = PBXBuildFile; productRef = A0000002AAAA000000000002 /* SpecttyTransport */; };
+		A0000001AAAA000000000003 /* SpecttyUI in Frameworks */ = {isa = PBXBuildFile; productRef = A0000002AAAA000000000003 /* SpecttyUI */; };
+		A0000001AAAA000000000004 /* SpecttyKeychain in Frameworks */ = {isa = PBXBuildFile; productRef = A0000002AAAA000000000004 /* SpecttyKeychain */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		8E69C2322F40460400614CEC /* Spectty.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Spectty.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -23,6 +30,10 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A0000001AAAA000000000001 /* SpecttyTerminal in Frameworks */,
+				A0000001AAAA000000000002 /* SpecttyTransport in Frameworks */,
+				A0000001AAAA000000000003 /* SpecttyUI in Frameworks */,
+				A0000001AAAA000000000004 /* SpecttyKeychain in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -65,6 +76,10 @@
 			);
 			name = Spectty;
 			packageProductDependencies = (
+				A0000002AAAA000000000001 /* SpecttyTerminal */,
+				A0000002AAAA000000000002 /* SpecttyTransport */,
+				A0000002AAAA000000000003 /* SpecttyUI */,
+				A0000002AAAA000000000004 /* SpecttyKeychain */,
 			);
 			productName = Spectty;
 			productReference = 8E69C2322F40460400614CEC /* Spectty.app */;
@@ -94,6 +109,12 @@
 			);
 			mainGroup = 8E69C2292F40460400614CEC;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				A0000003AAAA000000000001 /* XCLocalSwiftPackageReference "Packages/SpecttyTerminal" */,
+				A0000003AAAA000000000002 /* XCLocalSwiftPackageReference "Packages/SpecttyTransport" */,
+				A0000003AAAA000000000003 /* XCLocalSwiftPackageReference "Packages/SpecttyUI" */,
+				A0000003AAAA000000000004 /* XCLocalSwiftPackageReference "Packages/SpecttyKeychain" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 8E69C2332F40460400614CEC /* Products */;
 			projectDirPath = "";
@@ -332,6 +353,44 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		A0000003AAAA000000000001 /* XCLocalSwiftPackageReference "Packages/SpecttyTerminal" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/SpecttyTerminal;
+		};
+		A0000003AAAA000000000002 /* XCLocalSwiftPackageReference "Packages/SpecttyTransport" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/SpecttyTransport;
+		};
+		A0000003AAAA000000000003 /* XCLocalSwiftPackageReference "Packages/SpecttyUI" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/SpecttyUI;
+		};
+		A0000003AAAA000000000004 /* XCLocalSwiftPackageReference "Packages/SpecttyKeychain" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/SpecttyKeychain;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A0000002AAAA000000000001 /* SpecttyTerminal */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SpecttyTerminal;
+		};
+		A0000002AAAA000000000002 /* SpecttyTransport */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SpecttyTransport;
+		};
+		A0000002AAAA000000000003 /* SpecttyUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SpecttyUI;
+		};
+		A0000002AAAA000000000004 /* SpecttyKeychain */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SpecttyKeychain;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 8E69C22A2F40460400614CEC /* Project object */;
 }
