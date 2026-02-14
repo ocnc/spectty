@@ -4,8 +4,8 @@ import SwiftData
 struct ConnectionListView: View {
     @Environment(SessionManager.self) private var sessionManager
     @Environment(ConnectionStore.self) private var connectionStore
-    @State private var showingEditor = false
     @State private var editingConnection: ServerConnection?
+    @State private var isNewConnection = false
     @State private var showingQuickConnect = false
     @State private var quickConnectHost = ""
     @State private var navigationPath = NavigationPath()
@@ -64,6 +64,7 @@ struct ConnectionListView: View {
                         }
                         .contextMenu {
                             Button("Edit") {
+                                isNewConnection = false
                                 editingConnection = connection
                             }
                             Button("Delete", role: .destructive) {
@@ -86,8 +87,8 @@ struct ConnectionListView: View {
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
                         Button {
+                            isNewConnection = true
                             editingConnection = ServerConnection()
-                            showingEditor = true
                         } label: {
                             Label("New Connection", systemImage: "plus")
                         }
@@ -101,18 +102,15 @@ struct ConnectionListView: View {
                     }
                 }
             }
-            .sheet(isPresented: $showingEditor) {
-                if let connection = editingConnection {
-                    ConnectionEditorView(connection: connection, isNew: true) { saved in
-                        connectionStore.add(saved)
-                        showingEditor = false
-                    }
-                }
-            }
             .sheet(item: $editingConnection) { connection in
-                ConnectionEditorView(connection: connection, isNew: false) { _ in
-                    connectionStore.save()
+                ConnectionEditorView(connection: connection, isNew: isNewConnection) { saved in
+                    if isNewConnection {
+                        connectionStore.add(saved)
+                    } else {
+                        connectionStore.save()
+                    }
                     editingConnection = nil
+                    isNewConnection = false
                 }
             }
             .alert("Quick Connect", isPresented: $showingQuickConnect) {
