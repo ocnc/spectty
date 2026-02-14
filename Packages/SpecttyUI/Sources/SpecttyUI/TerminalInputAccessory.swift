@@ -16,6 +16,7 @@ public final class TerminalInputAccessory: UIView {
     private let stackView = UIStackView()
     private var ctrlButton: UIButton?
     private var altButton: UIButton?
+    private let haptic = UIImpactFeedbackGenerator(style: .rigid)
 
     public override init(frame: CGRect) {
         super.init(frame: frame)
@@ -117,6 +118,8 @@ public final class TerminalInputAccessory: UIView {
     // MARK: - Key Actions
 
     private func handleAction(_ action: KeyButtonAction) {
+        haptic.impactOccurred()
+
         var modifiers = KeyModifiers()
         if ctrlActive { modifiers.insert(.control) }
         if altActive { modifiers.insert(.alt) }
