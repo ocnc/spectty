@@ -31,6 +31,9 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
     /// Current font configuration.
     public private(set) var terminalFont = TerminalFont()
 
+    /// Gesture handler for scroll, pinch, selection.
+    private var gestureHandler: GestureHandler?
+
     /// Visual bell flash layer.
     private var bellLayer: CALayer?
 
@@ -43,6 +46,7 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
         self.renderer = TerminalMetalRenderer(device: device, scaleFactor: UIScreen.main.scale)
         feedbackGenerator.prepare()
         configure()
+        setupGestureHandler(emulator: emulator)
     }
 
     @available(*, unavailable)
@@ -59,6 +63,26 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
         self.delegate = self
         self.isMultipleTouchEnabled = true
         self.isUserInteractionEnabled = true
+
+        // Tap to focus and show keyboard.
+        let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
+        addGestureRecognizer(tap)
+    }
+
+    @objc private func handleTap() {
+        if isFirstResponder {
+            resignFirstResponder()
+        } else {
+            becomeFirstResponder()
+        }
+    }
+
+    private func setupGestureHandler(emulator: any TerminalEmulator) {
+        let handler = GestureHandler(metalView: self, emulator: emulator)
+        handler.onMouseEvent = { [weak self] data in
+            self?.onPaste?(data)
+        }
+        self.gestureHandler = handler
     }
 
     // MARK: - First Responder + Software Keyboard
@@ -72,26 +96,56 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
 
     /// UIKeyInput: software keyboard character input.
     public func insertText(_ text: String) {
+        var modifiers = KeyModifiers()
+        if _inputAccessory.ctrlActive { modifiers.insert(.control) }
+        if _inputAccessory.shiftActive { modifiers.insert(.shift) }
+        let hasModifiers = !modifiers.isEmpty
+
         for char in text {
+            let characters: String
+            if char == "\n" {
+                characters = "\r"
+            } else if modifiers.contains(.control), let ascii = char.asciiValue,
+                      (0x61...0x7A).contains(ascii) || (0x41...0x5A).contains(ascii) {
+                // Ctrl+letter → control character (e.g., Ctrl+C = 0x03)
+                let upper = ascii & 0x1F
+                characters = String(UnicodeScalar(upper))
+            } else {
+                characters = String(char)
+            }
+
             let event = KeyEvent(
                 keyCode: char == "\n" ? 0x28 : 0,
-                modifiers: [],
+                modifiers: modifiers,
                 isKeyDown: true,
-                characters: char == "\n" ? "\r" : String(char)
+                characters: characters
             )
             onKeyInput?(event)
+        }
+
+        if hasModifiers {
+            _inputAccessory.deactivateModifiers()
         }
     }
 
     /// UIKeyInput: software keyboard backspace.
     public func deleteBackward() {
+        var modifiers = KeyModifiers()
+        if _inputAccessory.ctrlActive { modifiers.insert(.control) }
+        if _inputAccessory.shiftActive { modifiers.insert(.shift) }
+        let hasModifiers = !modifiers.isEmpty
+
         let event = KeyEvent(
             keyCode: 0x2A,
-            modifiers: [],
+            modifiers: modifiers,
             isKeyDown: true,
             characters: "\u{7F}"
         )
         onKeyInput?(event)
+
+        if hasModifiers {
+            _inputAccessory.deactivateModifiers()
+        }
     }
 
     /// Disable autocorrect/autocapitalize — raw terminal input.
@@ -224,6 +278,11 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
     }
 
     // MARK: - Grid Size
+
+    /// The size of a single terminal cell in points.
+    public var cellSize: CGSize {
+        renderer?.cellSize ?? CGSize(width: 8, height: 17)
+    }
 
     public var gridSize: (columns: Int, rows: Int) {
         guard let renderer = renderer else { return (80, 24) }

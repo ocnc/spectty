@@ -14,7 +14,6 @@ struct TerminalSessionView: View {
     @State private var showDisconnectConfirm = false
     @State private var showRenameAlert = false
     @State private var renameText = ""
-    @FocusState private var terminalFocused: Bool
 
     var body: some View {
         ZStack {
@@ -33,7 +32,6 @@ struct TerminalSessionView: View {
                     session.resize(columns: columns, rows: rows)
                 }
             )
-            .focused($terminalFocused)
             .ignoresSafeArea(.keyboard)
 
             // Connection status overlay.
@@ -43,40 +41,40 @@ struct TerminalSessionView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Menu {
+                HStack(spacing: 12) {
                     Button {
-                        terminalFocused.toggle()
+                        // Global dismiss/show — the tap gesture on the terminal view handles show.
+                        dismissKeyboard()
                     } label: {
-                        Label(
-                            terminalFocused ? "Hide Keyboard" : "Show Keyboard",
-                            systemImage: terminalFocused ? "keyboard.chevron.compact.down" : "keyboard"
-                        )
+                        Image(systemName: "keyboard.chevron.compact.down")
                     }
 
-                    Button {
-                        UIPasteboard.general.string.map { text in
-                            session.sendData(Data(text.utf8))
+                    Menu {
+                        Button {
+                            UIPasteboard.general.string.map { text in
+                                session.sendData(Data(text.utf8))
+                            }
+                        } label: {
+                            Label("Paste", systemImage: "doc.on.clipboard")
+                        }
+
+                        Button {
+                            renameText = session.connectionName
+                            showRenameAlert = true
+                        } label: {
+                            Label("Rename", systemImage: "pencil")
+                        }
+
+                        Divider()
+
+                        Button(role: .destructive) {
+                            showDisconnectConfirm = true
+                        } label: {
+                            Label("Disconnect", systemImage: "xmark.circle")
                         }
                     } label: {
-                        Label("Paste", systemImage: "doc.on.clipboard")
+                        Image(systemName: "ellipsis.circle")
                     }
-
-                    Button {
-                        renameText = session.connectionName
-                        showRenameAlert = true
-                    } label: {
-                        Label("Rename", systemImage: "pencil")
-                    }
-
-                    Divider()
-
-                    Button(role: .destructive) {
-                        showDisconnectConfirm = true
-                    } label: {
-                        Label("Disconnect", systemImage: "xmark.circle")
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
                 }
             }
         }
@@ -99,9 +97,10 @@ struct TerminalSessionView: View {
             }
             Button("Cancel", role: .cancel) {}
         }
-        .onAppear {
-            terminalFocused = true
-        }
+    }
+
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 
     @ViewBuilder

@@ -8,14 +8,13 @@ public final class TerminalInputAccessory: UIInputView {
     public var onKeyPress: ((KeyEvent) -> Void)?
 
     /// Whether Ctrl modifier is active (toggleable).
-    private var ctrlActive = false
-    /// Whether Alt modifier is active (toggleable).
-    private var altActive = false
+    public private(set) var ctrlActive = false
+    /// Whether Shift modifier is active (toggleable).
+    public private(set) var shiftActive = false
 
-    private let scrollView = UIScrollView()
     private let stackView = UIStackView()
     private var ctrlButton: UIButton?
-    private var altButton: UIButton?
+    private var shiftButton: UIButton?
     private let haptic = UIImpactFeedbackGenerator(style: .rigid)
 
     public init(frame: CGRect) {
@@ -31,44 +30,30 @@ public final class TerminalInputAccessory: UIInputView {
     private func setup() {
         allowsSelfSizing = true
 
-        scrollView.showsHorizontalScrollIndicator = false
-        scrollView.showsVerticalScrollIndicator = false
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(scrollView)
-
         stackView.axis = .horizontal
-        stackView.spacing = 6
-        stackView.alignment = .center
+        stackView.spacing = 5
+        stackView.alignment = .fill
+        stackView.distribution = .fillEqually
         stackView.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.addSubview(stackView)
+        addSubview(stackView)
 
         let heightConstraint = heightAnchor.constraint(equalToConstant: 44)
         heightConstraint.priority = .defaultHigh
 
         NSLayoutConstraint.activate([
             heightConstraint,
-            scrollView.topAnchor.constraint(equalTo: topAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
-            scrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            scrollView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-
-            stackView.topAnchor.constraint(equalTo: scrollView.topAnchor),
-            stackView.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor),
-            stackView.leadingAnchor.constraint(equalTo: scrollView.leadingAnchor),
-            stackView.trailingAnchor.constraint(equalTo: scrollView.trailingAnchor),
-            stackView.heightAnchor.constraint(equalTo: scrollView.heightAnchor),
+            stackView.topAnchor.constraint(equalTo: topAnchor, constant: 4),
+            stackView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4),
+            stackView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
+            stackView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
         ])
 
-        // Build the key buttons.
+        // Build the key buttons — optimized for CLI coding (Claude Code / Codex).
         let keys: [(String, KeyButtonAction)] = [
             ("Esc", .escape),
             ("Tab", .tab),
             ("Ctrl", .toggleCtrl),
-            ("Alt", .toggleAlt),
-            ("|", .character("|")),
-            ("~", .character("~")),
-            ("-", .character("-")),
-            ("/", .character("/")),
+            ("Shift", .toggleShift),
             ("\u{2190}", .arrowLeft),   // ←
             ("\u{2193}", .arrowDown),   // ↓
             ("\u{2191}", .arrowUp),     // ↑
@@ -80,7 +65,7 @@ public final class TerminalInputAccessory: UIInputView {
             stackView.addArrangedSubview(button)
 
             if case .toggleCtrl = action { ctrlButton = button }
-            if case .toggleAlt = action { altButton = button }
+            if case .toggleShift = action { shiftButton = button }
         }
     }
 
@@ -94,8 +79,7 @@ public final class TerminalInputAccessory: UIInputView {
         case escape
         case tab
         case toggleCtrl
-        case toggleAlt
-        case character(String)
+        case toggleShift
         case arrowUp
         case arrowDown
         case arrowLeft
@@ -103,14 +87,19 @@ public final class TerminalInputAccessory: UIInputView {
     }
 
     private func makeButton(title: String, action: KeyButtonAction) -> UIButton {
-        let button = UIButton(type: .system)
-        button.setTitle(title, for: .normal)
-        button.titleLabel?.font = .systemFont(ofSize: 15, weight: .medium)
-        button.contentEdgeInsets = UIEdgeInsets(top: 6, left: 12, bottom: 6, right: 12)
-        button.backgroundColor = UIColor.secondarySystemBackground
-        button.layer.cornerRadius = 6
-        button.layer.cornerCurve = .continuous
+        var config = UIButton.Configuration.filled()
+        config.title = title
+        config.baseForegroundColor = .label
+        config.baseBackgroundColor = UIColor(white: 0.45, alpha: 0.4)
+        config.cornerStyle = .medium
+        config.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 2, bottom: 6, trailing: 2)
+        config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
+            var out = incoming
+            out.font = UIFont.systemFont(ofSize: 15, weight: .semibold)
+            return out
+        }
 
+        let button = UIButton(configuration: config)
         let handler = UIAction { [weak self] _ in
             self?.handleAction(action)
         }
@@ -126,7 +115,7 @@ public final class TerminalInputAccessory: UIInputView {
 
         var modifiers = KeyModifiers()
         if ctrlActive { modifiers.insert(.control) }
-        if altActive { modifiers.insert(.alt) }
+        if shiftActive { modifiers.insert(.shift) }
 
         switch action {
         case .escape:
@@ -138,12 +127,9 @@ public final class TerminalInputAccessory: UIInputView {
         case .toggleCtrl:
             ctrlActive.toggle()
             updateModifierButtons()
-        case .toggleAlt:
-            altActive.toggle()
+        case .toggleShift:
+            shiftActive.toggle()
             updateModifierButtons()
-        case .character(let ch):
-            sendKey(keyCode: 0, characters: ch, modifiers: modifiers)
-            deactivateModifiers()
         case .arrowUp:
             sendKey(keyCode: 0x52, characters: "", modifiers: modifiers)
             deactivateModifiers()
@@ -169,18 +155,24 @@ public final class TerminalInputAccessory: UIInputView {
         onKeyPress?(event)
     }
 
-    private func deactivateModifiers() {
+    public func deactivateModifiers() {
         ctrlActive = false
-        altActive = false
+        shiftActive = false
         updateModifierButtons()
     }
 
     private func updateModifierButtons() {
-        ctrlButton?.backgroundColor = ctrlActive
-            ? UIColor.systemBlue.withAlphaComponent(0.3)
-            : UIColor.secondarySystemBackground
-        altButton?.backgroundColor = altActive
-            ? UIColor.systemBlue.withAlphaComponent(0.3)
-            : UIColor.secondarySystemBackground
+        updateButtonHighlight(ctrlButton, active: ctrlActive)
+        updateButtonHighlight(shiftButton, active: shiftActive)
+    }
+
+    private func updateButtonHighlight(_ button: UIButton?, active: Bool) {
+        guard let button else { return }
+        var config = button.configuration ?? .filled()
+        config.baseBackgroundColor = active
+            ? UIColor.systemBlue.withAlphaComponent(0.5)
+            : UIColor(white: 0.45, alpha: 0.4)
+        config.baseForegroundColor = active ? .white : .label
+        button.configuration = config
     }
 }

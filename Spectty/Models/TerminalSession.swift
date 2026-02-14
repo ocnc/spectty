@@ -22,11 +22,23 @@ final class TerminalSession: Identifiable {
         self.connectionName = connectionName
         self.emulator = GhosttyTerminalEmulator(columns: columns, rows: rows, scrollbackCapacity: scrollbackCapacity)
         self.transport = transport
+
+        // Wire terminal responses (DSR, DA) back through the transport.
+        self.emulator.onResponse = { [weak self] data in
+            guard let self else { return }
+            self.sendData(data)
+        }
     }
 
     /// Start the session: connect and begin piping data.
     func start() async throws {
         try await transport.connect()
+
+        // Sync the actual terminal size now that the connection is live.
+        // The view may have laid out to a different size during the connection handshake.
+        let cols = emulator.state.columns
+        let rows = emulator.state.rows
+        try? await transport.resize(columns: cols, rows: rows)
 
         // Listen for transport state changes.
         stateTask = Task { [weak self] in

@@ -8,6 +8,12 @@ public final class GhosttyTerminalEmulator: TerminalEmulator, @unchecked Sendabl
     private let vtStateMachine: VTStateMachine
     private let keyEncoder = KeyEncoder()
 
+    /// Called when the terminal needs to send a response back to the host.
+    public var onResponse: ((Data) -> Void)? {
+        get { vtStateMachine.onResponse }
+        set { vtStateMachine.onResponse = newValue }
+    }
+
     public init(columns: Int = 80, rows: Int = 24, scrollbackCapacity: Int = 10_000) {
         self.state = TerminalState(columns: columns, rows: rows, scrollbackCapacity: scrollbackCapacity)
         self.vtStateMachine = VTStateMachine(state: self.state)

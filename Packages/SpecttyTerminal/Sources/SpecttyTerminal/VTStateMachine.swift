@@ -30,6 +30,10 @@ public final class VTStateMachine: @unchecked Sendable {
     private var oscPayload: [UInt8] = []
     private var utf8Buffer: [UInt8] = []
 
+    /// Called when the terminal needs to send a response back to the host
+    /// (e.g., cursor position report, device attributes).
+    public var onResponse: ((Data) -> Void)?
+
     public init(state: TerminalState) {
         self.terminalState = state
     }
@@ -564,8 +568,17 @@ public final class VTStateMachine: @unchecked Sendable {
             dispatchSGR()
 
         case "n": // DSR — Device Status Report
-            // We'll handle this via a callback if needed.
-            break
+            let p = param(0, default: 0)
+            if p == 6 {
+                // CPR — Cursor Position Report: respond with \x1b[{row};{col}R (1-based).
+                let row = screen.cursor.row + 1
+                let col = screen.cursor.col + 1
+                let response = Data("\u{1b}[\(row);\(col)R".utf8)
+                onResponse?(response)
+            } else if p == 5 {
+                // Device status: respond with "OK".
+                onResponse?(Data("\u{1b}[0n".utf8))
+            }
 
         case "r": // DECSTBM — Set Scrolling Region
             let top = max(param(0, default: 1), 1) - 1
@@ -595,8 +608,13 @@ public final class VTStateMachine: @unchecked Sendable {
             }
 
         case "c": // DA — Device Attributes
-            // Response would be sent via transport callback. Skip for now.
-            break
+            if intermediateChar == ">" {
+                // DA2 — Secondary Device Attributes: report as VT220.
+                onResponse?(Data("\u{1b}[>1;10;0c".utf8))
+            } else {
+                // DA1 — Primary Device Attributes: report as VT220 with ANSI color.
+                onResponse?(Data("\u{1b}[?62;22c".utf8))
+            }
 
         case "h": // SM — Set Mode
             setMode(true)

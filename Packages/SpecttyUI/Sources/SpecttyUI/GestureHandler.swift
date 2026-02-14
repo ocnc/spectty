@@ -61,13 +61,13 @@ public final class GestureHandler: NSObject {
         guard let metalView = metalView, let emulator = emulator else { return }
 
         let translation = gesture.translation(in: metalView)
-        let cellHeight = metalView.terminalFont.size * 1.2 // approximate
+        let cellHeight = metalView.cellSize.height
 
         // Check if alternate screen (tmux/vim) — send mouse scroll events instead.
         if emulator.state.modes.contains(.alternateScreen) && emulator.state.modes.contains(.mouseAny) {
             // In alternate screen with mouse tracking, send scroll events.
             if gesture.state == .changed {
-                let lines = Int(-translation.y / cellHeight)
+                let lines = Int(translation.y / cellHeight)
                 if lines != 0 {
                     // Send mouse scroll button events.
                     let button: UInt8 = lines > 0 ? 64 : 65 // Up or Down scroll
@@ -86,7 +86,7 @@ public final class GestureHandler: NSObject {
 
         // Normal screen: scroll through scrollback buffer.
         if gesture.state == .changed {
-            let lines = Int(-translation.y / cellHeight)
+            let lines = Int(translation.y / cellHeight)
             if lines != 0 {
                 metalView.scrollBy(lines)
                 gesture.setTranslation(.zero, in: metalView)

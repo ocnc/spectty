@@ -61,6 +61,10 @@ public final class SSHTransport: TerminalTransport, @unchecked Sendable {
     nonisolated(unsafe) private var parentChannel: Channel?
     nonisolated(unsafe) private var childChannel: Channel?
 
+    // Track the last known terminal size for use in PTY allocation.
+    nonisolated(unsafe) private var currentColumns: Int = 80
+    nonisolated(unsafe) private var currentRows: Int = 24
+
     /// Create an SSH transport.
     ///
     /// - Parameters:
@@ -194,8 +198,13 @@ public final class SSHTransport: TerminalTransport, @unchecked Sendable {
     }
 
     public func resize(columns: Int, rows: Int) async throws {
+        // Always store the latest size so the PTY request uses correct dimensions.
+        currentColumns = columns
+        currentRows = rows
+
         guard let child = childChannel else {
-            throw SSHTransportError.notConnected
+            // Not connected yet — size is stored and will be used in the PTY request.
+            return
         }
 
         let request = SSHChannelRequestEvent.WindowChangeRequest(
@@ -255,12 +264,12 @@ public final class SSHTransport: TerminalTransport, @unchecked Sendable {
 
         self.childChannel = childChannel
 
-        // Request PTY allocation.
+        // Request PTY allocation using the current terminal size.
         let ptyRequest = SSHChannelRequestEvent.PseudoTerminalRequest(
             wantReply: true,
             term: "xterm-256color",
-            terminalCharacterWidth: 80,
-            terminalRowHeight: 24,
+            terminalCharacterWidth: currentColumns,
+            terminalRowHeight: currentRows,
             terminalPixelWidth: 0,
             terminalPixelHeight: 0,
             terminalModes: SSHTerminalModes([:])

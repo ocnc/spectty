@@ -63,9 +63,11 @@ struct ConnectionEditorView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        savePasswordToKeychain()
-                        onSave(connection)
-                        dismiss()
+                        Task {
+                            await savePasswordToKeychain()
+                            onSave(connection)
+                            dismiss()
+                        }
                     }
                     .disabled(connection.host.isEmpty || connection.username.isEmpty)
                 }
@@ -73,15 +75,13 @@ struct ConnectionEditorView: View {
         }
     }
 
-    private func savePasswordToKeychain() {
+    private func savePasswordToKeychain() async {
         guard connection.authMethod == .password, !connection.password.isEmpty else { return }
         let keychain = KeychainManager()
         let account = "password-\(connection.id.uuidString)"
-        Task {
-            try? await keychain.saveOrUpdate(
-                key: Data(connection.password.utf8),
-                account: account
-            )
-        }
+        try? await keychain.saveOrUpdate(
+            key: Data(connection.password.utf8),
+            account: account
+        )
     }
 }
