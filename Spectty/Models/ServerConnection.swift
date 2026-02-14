@@ -40,6 +40,11 @@ final class ServerConnection {
     /// Sort order for the connection list.
     var sortOrder: Int
 
+    /// Transient password — not persisted to SwiftData, only lives in memory
+    /// for the duration of a session.
+    @Transient
+    var password: String = ""
+
     init(
         name: String = "",
         host: String = "",

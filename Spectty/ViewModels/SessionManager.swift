@@ -18,7 +18,7 @@ final class SessionManager {
             host: connection.host,
             port: connection.port,
             username: connection.username,
-            authMethod: .password("") // TODO: Retrieve from keychain
+            authMethod: .password(connection.password)
         )
 
         let transport: any TerminalTransport

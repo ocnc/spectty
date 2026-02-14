@@ -5,7 +5,6 @@ struct ConnectionEditorView: View {
     let isNew: Bool
     let onSave: (ServerConnection) -> Void
     @Environment(\.dismiss) private var dismiss
-    @State private var password = ""
 
     var body: some View {
         NavigationStack {
@@ -38,7 +37,7 @@ struct ConnectionEditorView: View {
                     }
 
                     if connection.authMethod == .password {
-                        SecureField("Password", text: $password)
+                        SecureField("Password", text: $connection.password)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                     }
