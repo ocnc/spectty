@@ -37,6 +37,9 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
     /// Last reported grid size — avoids duplicate and zero-size resize notifications.
     private var lastReportedGridSize: (columns: Int, rows: Int) = (0, 0)
 
+    /// Debounce timer for resize — prevents sending intermediate sizes during keyboard animation.
+    private var resizeDebounce: DispatchWorkItem?
+
     /// Visual bell flash layer.
     private var bellLayer: CALayer?
 
@@ -302,8 +305,20 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
         guard columns > 1, rows > 1 else { return }
         // Don't send duplicate resizes.
         guard columns != lastReportedGridSize.columns || rows != lastReportedGridSize.rows else { return }
-        lastReportedGridSize = (columns, rows)
-        onResize?(columns, rows)
+
+        // Debounce: keyboard animations trigger many intermediate layouts.
+        // Only send the resize once the layout stabilizes.
+        resizeDebounce?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            let (cols, rows) = self.gridSize
+            guard cols > 1, rows > 1 else { return }
+            guard cols != self.lastReportedGridSize.columns || rows != self.lastReportedGridSize.rows else { return }
+            self.lastReportedGridSize = (cols, rows)
+            self.onResize?(cols, rows)
+        }
+        resizeDebounce = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
     }
 
     // MARK: - Layout
