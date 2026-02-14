@@ -32,7 +32,6 @@ struct TerminalSessionView: View {
                     session.resize(columns: columns, rows: rows)
                 }
             )
-            .ignoresSafeArea(.keyboard)
 
             // Connection status overlay.
             connectionOverlay

@@ -34,6 +34,9 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
     /// Gesture handler for scroll, pinch, selection.
     private var gestureHandler: GestureHandler?
 
+    /// Last reported grid size — avoids duplicate and zero-size resize notifications.
+    private var lastReportedGridSize: (columns: Int, rows: Int) = (0, 0)
+
     /// Visual bell flash layer.
     private var bellLayer: CALayer?
 
@@ -295,6 +298,11 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
 
     private func notifyResizeIfNeeded() {
         let (columns, rows) = gridSize
+        // Don't send resize for views that haven't been laid out yet.
+        guard columns > 1, rows > 1 else { return }
+        // Don't send duplicate resizes.
+        guard columns != lastReportedGridSize.columns || rows != lastReportedGridSize.rows else { return }
+        lastReportedGridSize = (columns, rows)
         onResize?(columns, rows)
     }
 

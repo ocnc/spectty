@@ -90,7 +90,7 @@ public final class TerminalInputAccessory: UIInputView {
         var config = UIButton.Configuration.filled()
         config.title = title
         config.baseForegroundColor = .label
-        config.baseBackgroundColor = UIColor(white: 0.45, alpha: 0.4)
+        config.baseBackgroundColor = .systemGray4
         config.cornerStyle = .medium
         config.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 2, bottom: 6, trailing: 2)
         config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
@@ -170,8 +170,8 @@ public final class TerminalInputAccessory: UIInputView {
         guard let button else { return }
         var config = button.configuration ?? .filled()
         config.baseBackgroundColor = active
-            ? UIColor.systemBlue.withAlphaComponent(0.5)
-            : UIColor(white: 0.45, alpha: 0.4)
+            ? .systemBlue
+            : .systemGray4
         config.baseForegroundColor = active ? .white : .label
         button.configuration = config
     }
