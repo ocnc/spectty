@@ -7,7 +7,7 @@ import SpecttyTransport
 @MainActor
 final class TerminalSession: Identifiable {
     let id: UUID
-    let connectionName: String
+    var connectionName: String
     let emulator: GhosttyTerminalEmulator
     let transport: any TerminalTransport
 
@@ -17,10 +17,10 @@ final class TerminalSession: Identifiable {
     nonisolated(unsafe) private var receiveTask: Task<Void, Never>?
     nonisolated(unsafe) private var stateTask: Task<Void, Never>?
 
-    init(id: UUID = UUID(), connectionName: String, transport: any TerminalTransport, columns: Int = 80, rows: Int = 24) {
+    init(id: UUID = UUID(), connectionName: String, transport: any TerminalTransport, columns: Int = 80, rows: Int = 24, scrollbackCapacity: Int = 10_000) {
         self.id = id
         self.connectionName = connectionName
-        self.emulator = GhosttyTerminalEmulator(columns: columns, rows: rows)
+        self.emulator = GhosttyTerminalEmulator(columns: columns, rows: rows, scrollbackCapacity: scrollbackCapacity)
         self.transport = transport
     }
 

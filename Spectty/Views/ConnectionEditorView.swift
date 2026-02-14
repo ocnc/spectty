@@ -1,4 +1,5 @@
 import SwiftUI
+import SpecttyKeychain
 
 struct ConnectionEditorView: View {
     @Bindable var connection: ServerConnection
@@ -62,12 +63,25 @@ struct ConnectionEditorView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
+                        savePasswordToKeychain()
                         onSave(connection)
                         dismiss()
                     }
                     .disabled(connection.host.isEmpty || connection.username.isEmpty)
                 }
             }
+        }
+    }
+
+    private func savePasswordToKeychain() {
+        guard connection.authMethod == .password, !connection.password.isEmpty else { return }
+        let keychain = KeychainManager()
+        let account = "password-\(connection.id.uuidString)"
+        Task {
+            try? await keychain.saveOrUpdate(
+                key: Data(connection.password.utf8),
+                account: account
+            )
         }
     }
 }

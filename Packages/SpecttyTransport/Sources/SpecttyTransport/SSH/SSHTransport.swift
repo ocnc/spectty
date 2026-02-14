@@ -123,7 +123,6 @@ public final class SSHTransport: TerminalTransport, @unchecked Sendable {
                         inboundChildChannelInitializer: nil
                     )
                     try channel.pipeline.syncOperations.addHandler(sshHandler)
-                    try channel.pipeline.syncOperations.addHandler(SSHErrorHandler())
                 }
             }
             .channelOption(ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR), value: 1)
@@ -246,7 +245,6 @@ public final class SSHTransport: TerminalTransport, @unchecked Sendable {
 
                         return childChannel.eventLoop.makeCompletedFuture {
                             try childChannel.pipeline.syncOperations.addHandler(channelHandler)
-                            try childChannel.pipeline.syncOperations.addHandler(SSHErrorHandler())
                         }
                     }
                 }
@@ -280,15 +278,3 @@ public final class SSHTransport: TerminalTransport, @unchecked Sendable {
     }
 }
 
-// MARK: - SSH Error Handler
-
-/// Simple inbound error handler that logs and closes on error.
-private final class SSHErrorHandler: ChannelInboundHandler {
-    typealias InboundIn = Any
-
-    func errorCaught(context: ChannelHandlerContext, error: Error) {
-        context.close(promise: nil)
-    }
-}
-
-extension SSHErrorHandler: @unchecked Sendable {}

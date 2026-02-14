@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import SpecttyKeychain
 
 struct ConnectionListView: View {
     @Environment(SessionManager.self) private var sessionManager
@@ -10,6 +11,11 @@ struct ConnectionListView: View {
     @State private var quickConnectHost = ""
     @State private var navigationPath = NavigationPath()
     @State private var connectionError: String?
+    @State private var pendingConnection: ServerConnection?
+    @State private var connectPassword = ""
+    @State private var showPasswordPrompt = false
+    @State private var renamingSession: TerminalSession?
+    @State private var sessionRenameText = ""
 
     var body: some View {
         NavigationStack(path: $navigationPath) {
@@ -33,6 +39,19 @@ struct ConnectionListView: View {
                                                 .foregroundStyle(.secondary)
                                         }
                                     }
+                                }
+                            }
+                            .contextMenu {
+                                Button {
+                                    sessionRenameText = session.connectionName
+                                    renamingSession = session
+                                } label: {
+                                    Label("Rename", systemImage: "pencil")
+                                }
+                                Button(role: .destructive) {
+                                    sessionManager.disconnect(session)
+                                } label: {
+                                    Label("Disconnect", systemImage: "xmark.circle")
                                 }
                             }
                         }
@@ -147,19 +166,86 @@ struct ConnectionListView: View {
                     Text(error)
                 }
             }
+            .alert("Password", isPresented: $showPasswordPrompt) {
+                SecureField("Password", text: $connectPassword)
+                Button("Connect") {
+                    if let connection = pendingConnection {
+                        connection.password = connectPassword
+                        // Also save to Keychain for future use.
+                        let account = "password-\(connection.id.uuidString)"
+                        let pw = connectPassword
+                        Task {
+                            let keychain = KeychainManager()
+                            try? await keychain.saveOrUpdate(
+                                key: Data(pw.utf8),
+                                account: account
+                            )
+                        }
+                        Task { await doConnect(connection) }
+                    }
+                    pendingConnection = nil
+                    connectPassword = ""
+                }
+                Button("Cancel", role: .cancel) {
+                    pendingConnection = nil
+                    connectPassword = ""
+                }
+            } message: {
+                if let connection = pendingConnection {
+                    Text("\(connection.username)@\(connection.host)")
+                }
+            }
+            .alert("Rename Session", isPresented: .init(
+                get: { renamingSession != nil },
+                set: { if !$0 { renamingSession = nil } }
+            )) {
+                TextField("Session name", text: $sessionRenameText)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Button("Save") {
+                    let trimmed = sessionRenameText.trimmingCharacters(in: .whitespaces)
+                    if !trimmed.isEmpty {
+                        renamingSession?.connectionName = trimmed
+                    }
+                    renamingSession = nil
+                }
+                Button("Cancel", role: .cancel) {
+                    renamingSession = nil
+                }
+            }
         }
     }
 
     private func connectTo(_ connection: ServerConnection) {
-        Task {
-            do {
-                let session = try await sessionManager.connect(to: connection)
-                connection.lastConnected = Date()
-                connectionStore.save()
-                navigationPath.append(session.id)
-            } catch {
-                connectionError = String(describing: error)
+        // If password auth and no transient password, check Keychain. If missing, prompt.
+        if connection.authMethod == .password && connection.password.isEmpty {
+            let account = "password-\(connection.id.uuidString)"
+            Task {
+                let keychain = KeychainManager()
+                let stored = try? await keychain.load(account: account)
+                if stored == nil {
+                    // No stored password — prompt user.
+                    connectPassword = ""
+                    pendingConnection = connection
+                    showPasswordPrompt = true
+                    return
+                }
+                // Password is in Keychain, SessionManager will load it.
+                await doConnect(connection)
             }
+        } else {
+            Task { await doConnect(connection) }
+        }
+    }
+
+    private func doConnect(_ connection: ServerConnection) async {
+        do {
+            let session = try await sessionManager.connect(to: connection)
+            connection.lastConnected = Date()
+            connectionStore.save()
+            navigationPath.append(session.id)
+        } catch {
+            connectionError = String(describing: error)
         }
     }
 

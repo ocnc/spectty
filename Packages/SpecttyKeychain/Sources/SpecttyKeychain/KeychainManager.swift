@@ -60,6 +60,27 @@ public actor KeychainManager {
         }
     }
 
+    /// Save or update data in the Keychain. If an entry already exists for the
+    /// given account it is replaced; otherwise a new entry is created.
+    public func saveOrUpdate(key: Data, account: String) throws {
+        do {
+            try save(key: key, account: account)
+        } catch KeychainError.itemAlreadyExists {
+            let query: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: Self.serviceName,
+                kSecAttrAccount as String: account,
+            ]
+            let attrs: [String: Any] = [
+                kSecValueData as String: key,
+            ]
+            let status = SecItemUpdate(query as CFDictionary, attrs as CFDictionary)
+            guard status == errSecSuccess else {
+                throw KeychainError.saveFailed(status: status)
+            }
+        }
+    }
+
     // MARK: Load
 
     /// Retrieve the SSH private key data for a given account.

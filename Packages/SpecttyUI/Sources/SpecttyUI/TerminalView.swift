@@ -7,14 +7,23 @@ public struct TerminalView: UIViewRepresentable {
     private let onKeyInput: ((KeyEvent) -> Void)?
     private let onPaste: ((Data) -> Void)?
     private let onResize: ((Int, Int) -> Void)?
+    private let font: TerminalFont
+    private let themeName: String
+    private let cursorStyle: CursorStyle
 
     public init(
         emulator: any TerminalEmulator,
+        font: TerminalFont = TerminalFont(),
+        themeName: String = "Default",
+        cursorStyle: CursorStyle = .block,
         onKeyInput: ((KeyEvent) -> Void)? = nil,
         onPaste: ((Data) -> Void)? = nil,
         onResize: ((Int, Int) -> Void)? = nil
     ) {
         self.emulator = emulator
+        self.font = font
+        self.themeName = themeName
+        self.cursorStyle = cursorStyle
         self.onKeyInput = onKeyInput
         self.onPaste = onPaste
         self.onResize = onResize
@@ -25,6 +34,9 @@ public struct TerminalView: UIViewRepresentable {
         metalView.onKeyInput = onKeyInput
         metalView.onPaste = onPaste
         metalView.onResize = onResize
+        metalView.setFont(font)
+        metalView.setTheme(TerminalTheme.named(themeName))
+        metalView.setCursorStyle(cursorStyle)
 
         // Auto-focus once on creation to show the keyboard.
         DispatchQueue.main.async {
@@ -38,5 +50,8 @@ public struct TerminalView: UIViewRepresentable {
         uiView.onKeyInput = onKeyInput
         uiView.onPaste = onPaste
         uiView.onResize = onResize
+        uiView.setFont(font)
+        uiView.setTheme(TerminalTheme.named(themeName))
+        uiView.setCursorStyle(cursorStyle)
     }
 }

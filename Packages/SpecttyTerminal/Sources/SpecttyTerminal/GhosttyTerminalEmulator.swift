@@ -8,8 +8,8 @@ public final class GhosttyTerminalEmulator: TerminalEmulator, @unchecked Sendabl
     private let vtStateMachine: VTStateMachine
     private let keyEncoder = KeyEncoder()
 
-    public init(columns: Int = 80, rows: Int = 24) {
-        self.state = TerminalState(columns: columns, rows: rows)
+    public init(columns: Int = 80, rows: Int = 24, scrollbackCapacity: Int = 10_000) {
+        self.state = TerminalState(columns: columns, rows: rows, scrollbackCapacity: scrollbackCapacity)
         self.vtStateMachine = VTStateMachine(state: self.state)
     }
 

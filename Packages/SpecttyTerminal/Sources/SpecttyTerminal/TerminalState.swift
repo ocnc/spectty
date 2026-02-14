@@ -127,10 +127,10 @@ public final class TerminalState: @unchecked Sendable {
     public var columns: Int { activeScreen.columns }
     public var rows: Int { activeScreen.rows }
 
-    public init(columns: Int, rows: Int) {
+    public init(columns: Int, rows: Int, scrollbackCapacity: Int = 10_000) {
         self.primaryScreen = TerminalScreenState(columns: columns, rows: rows)
         self.alternateScreen = TerminalScreenState(columns: columns, rows: rows)
-        self.scrollback = TerminalBuffer()
+        self.scrollback = TerminalBuffer(capacity: scrollbackCapacity)
         self.modes = [.autoWrap, .cursorVisible]
         self.activeScreen = primaryScreen
 

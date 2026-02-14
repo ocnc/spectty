@@ -6,7 +6,7 @@ struct SpecttyApp: App {
     @State private var sessionManager = SessionManager()
 
     var sharedModelContainer: ModelContainer = {
-        let schema = Schema([ServerConnection.self, TerminalProfile.self])
+        let schema = Schema([ServerConnection.self])
         let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
         do {
             return try ModelContainer(for: schema, configurations: [config])

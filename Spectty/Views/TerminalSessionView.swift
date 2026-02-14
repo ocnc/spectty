@@ -7,13 +7,22 @@ struct TerminalSessionView: View {
     let session: TerminalSession
     @Environment(SessionManager.self) private var sessionManager
     @Environment(\.dismiss) private var dismiss
+    @AppStorage("defaultFontName") private var fontName = "Menlo"
+    @AppStorage("defaultFontSize") private var fontSize = 14.0
+    @AppStorage("defaultColorScheme") private var colorScheme = "Default"
+    @AppStorage("cursorStyle") private var cursorStyle = "block"
     @State private var showDisconnectConfirm = false
+    @State private var showRenameAlert = false
+    @State private var renameText = ""
     @FocusState private var terminalFocused: Bool
 
     var body: some View {
         ZStack {
             TerminalView(
                 emulator: session.emulator,
+                font: TerminalFont(name: fontName, size: CGFloat(fontSize)),
+                themeName: colorScheme,
+                cursorStyle: CursorStyle(rawValue: cursorStyle) ?? .block,
                 onKeyInput: { event in
                     session.sendKey(event)
                 },
@@ -33,21 +42,30 @@ struct TerminalSessionView: View {
         .navigationTitle(session.title.isEmpty ? session.connectionName : session.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .secondaryAction) {
-                Button {
-                    terminalFocused.toggle()
-                } label: {
-                    Image(systemName: terminalFocused ? "keyboard.chevron.compact.down" : "keyboard")
-                }
-            }
             ToolbarItem(placement: .primaryAction) {
                 Menu {
+                    Button {
+                        terminalFocused.toggle()
+                    } label: {
+                        Label(
+                            terminalFocused ? "Hide Keyboard" : "Show Keyboard",
+                            systemImage: terminalFocused ? "keyboard.chevron.compact.down" : "keyboard"
+                        )
+                    }
+
                     Button {
                         UIPasteboard.general.string.map { text in
                             session.sendData(Data(text.utf8))
                         }
                     } label: {
                         Label("Paste", systemImage: "doc.on.clipboard")
+                    }
+
+                    Button {
+                        renameText = session.connectionName
+                        showRenameAlert = true
+                    } label: {
+                        Label("Rename", systemImage: "pencil")
                     }
 
                     Divider()
@@ -66,6 +84,18 @@ struct TerminalSessionView: View {
             Button("Disconnect", role: .destructive) {
                 sessionManager.disconnect(session)
                 dismiss()
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+        .alert("Rename Session", isPresented: $showRenameAlert) {
+            TextField("Session name", text: $renameText)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            Button("Save") {
+                let trimmed = renameText.trimmingCharacters(in: .whitespaces)
+                if !trimmed.isEmpty {
+                    session.connectionName = trimmed
+                }
             }
             Button("Cancel", role: .cancel) {}
         }

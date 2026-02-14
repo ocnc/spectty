@@ -40,7 +40,7 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
         }
         super.init(frame: frame, device: device)
         self.terminalEmulator = emulator
-        self.renderer = TerminalMetalRenderer(device: device)
+        self.renderer = TerminalMetalRenderer(device: device, scaleFactor: UIScreen.main.scale)
         feedbackGenerator.prepare()
         configure()
     }
@@ -185,12 +185,28 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
         feedbackGenerator.impactOccurred(intensity: 0.5)
     }
 
-    // MARK: - Font
+    // MARK: - Appearance
 
     public func setFont(_ font: TerminalFont) {
+        guard font.name != terminalFont.name || font.size != terminalFont.size else { return }
         self.terminalFont = font
         renderer?.setFont(font)
         notifyResizeIfNeeded()
+    }
+
+    public func setTheme(_ theme: TerminalTheme) {
+        renderer?.setTheme(theme)
+        // Update the clear color to match the theme background.
+        self.clearColor = MTLClearColor(
+            red: Double(theme.background.0) / 255.0,
+            green: Double(theme.background.1) / 255.0,
+            blue: Double(theme.background.2) / 255.0,
+            alpha: 1.0
+        )
+    }
+
+    public func setCursorStyle(_ style: CursorStyle) {
+        renderer?.setCursorStyle(style)
     }
 
     // MARK: - Scrollback

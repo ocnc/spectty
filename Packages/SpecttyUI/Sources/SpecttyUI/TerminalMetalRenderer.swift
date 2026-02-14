@@ -61,44 +61,91 @@ public final class TerminalMetalRenderer: TerminalRenderer {
     private var atlasNextX: Int = 0
     private var atlasNextY: Int = 0
     private var atlasRowHeight: Int = 0
-    private let atlasWidth = 2048
-    private let atlasHeight = 2048
+    private let atlasWidth = 4096
+    private let atlasHeight = 4096
 
     // Font
-    private var font: CTFont
+    private var font: CTFont             // 1x font for metrics
+    private var scaledFont: CTFont       // scaled font for rasterization
     private var _cellSize: CGSize = .zero
     public var cellSize: CGSize { _cellSize }
+    private var _scaleFactor: CGFloat = 1.0
 
     // Vertex buffer
     private var vertexBuffer: MTLBuffer?
     private var vertexCount: Int = 0
 
-    // Theme colors
-    private var defaultFG: (UInt8, UInt8, UInt8) = (229, 229, 229)
-    private var defaultBG: (UInt8, UInt8, UInt8) = (30, 30, 30)
-    private var cursorColor: (UInt8, UInt8, UInt8) = (229, 229, 229)
+    // Theme
+    private var theme: TerminalTheme = .default
+    private var defaultFG: (UInt8, UInt8, UInt8) { theme.foreground }
+    private var defaultBG: (UInt8, UInt8, UInt8) { theme.background }
+    private var cursorColor: (UInt8, UInt8, UInt8) { theme.cursor }
+    private var _cursorStyle: CursorStyle = .block
 
-    public init(device: MTLDevice) {
+    public init(device: MTLDevice, scaleFactor: CGFloat) {
         self.device = device
+        self._scaleFactor = scaleFactor
         self.commandQueue = device.makeCommandQueue()
         self.font = CTFontCreateWithName("Menlo" as CFString, 14, nil)
+        self.scaledFont = CTFontCreateWithName("Menlo" as CFString, 14 * scaleFactor, nil)
         computeCellSize()
         buildAtlas()
         buildPipeline()
     }
 
+    /// Update scale factor (e.g., when moving between screens).
+    public func setScaleFactor(_ scale: CGFloat) {
+        guard scale != _scaleFactor else { return }
+        _scaleFactor = scale
+        let size = CTFontGetSize(font)
+        scaledFont = CTFontCreateWithName(CTFontCopyPostScriptName(font), size * scale, nil)
+        glyphCache.removeAll()
+        atlasNextX = 0
+        atlasNextY = 0
+        atlasRowHeight = 0
+        buildAtlas()
+    }
+
+    private var _currentFontName: String = "Menlo"
+    private var _currentFontSize: CGFloat = 14
+
     public func setFont(_ termFont: TerminalFont) {
-        if let ctFont = CTFont(termFont.name as CFString, size: termFont.size) as CTFont? {
-            self.font = ctFont
-        } else {
-            self.font = CTFontCreateWithName("Menlo" as CFString, termFont.size, nil)
-        }
+        guard termFont.name != _currentFontName || termFont.size != _currentFontSize else { return }
+        _currentFontName = termFont.name
+        _currentFontSize = termFont.size
+        self.font = CTFontCreateWithName(termFont.name as CFString, termFont.size, nil)
+        self.scaledFont = CTFontCreateWithName(termFont.name as CFString, termFont.size * _scaleFactor, nil)
         computeCellSize()
         glyphCache.removeAll()
         atlasNextX = 0
         atlasNextY = 0
         atlasRowHeight = 0
         buildAtlas()
+    }
+
+    public func setTheme(_ theme: TerminalTheme) {
+        self.theme = theme
+    }
+
+    public func setCursorStyle(_ style: CursorStyle) {
+        self._cursorStyle = style
+    }
+
+    // MARK: - Color Resolution
+
+    /// Resolve a TerminalColor using the current theme's ANSI overrides for indices 0-15.
+    private func resolveColor(_ color: TerminalColor, default defaultRGB: (UInt8, UInt8, UInt8)) -> (UInt8, UInt8, UInt8) {
+        switch color {
+        case .default:
+            return defaultRGB
+        case .indexed(let idx):
+            if idx < 16, Int(idx) < theme.ansiColors.count {
+                return theme.ansiColors[Int(idx)]
+            }
+            return color.resolved(defaultColor: defaultRGB)
+        case .rgb(let r, let g, let b):
+            return (r, g, b)
+        }
     }
 
     // MARK: - Cell Size Computation
@@ -145,35 +192,33 @@ public final class TerminalMetalRenderer: TerminalRenderer {
             return cached
         }
 
-        let scalars = Array(char.unicodeScalars)
-        var unichars = scalars.map { UniChar($0.value) }
+        // Use the scaled font for rasterization at native pixel resolution.
+        var unichars = Array(String(char).utf16)
         var glyphs = [CGGlyph](repeating: 0, count: unichars.count)
-        CTFontGetGlyphsForCharacters(font, &unichars, &glyphs, unichars.count)
+        CTFontGetGlyphsForCharacters(scaledFont, &unichars, &glyphs, unichars.count)
 
         let glyph = glyphs[0]
         var boundingRect = CGRect.zero
-        CTFontGetBoundingRectsForGlyphs(font, .horizontal, [glyph], &boundingRect, 1)
+        CTFontGetBoundingRectsForGlyphs(scaledFont, .horizontal, [glyph], &boundingRect, 1)
 
-        let glyphWidth = max(Int(ceil(boundingRect.width)), 1)
-        let glyphHeight = max(Int(ceil(_cellSize.height)), 1)
+        let scale = _scaleFactor
+        let bitmapWidth = max(Int(ceil(_cellSize.width * scale)), 1)
+        let bitmapHeight = max(Int(ceil(_cellSize.height * scale)), 1)
 
         // Check if we need to move to the next row in the atlas.
-        if atlasNextX + glyphWidth > atlasWidth {
+        if atlasNextX + bitmapWidth > atlasWidth {
             atlasNextX = 0
             atlasNextY += atlasRowHeight
             atlasRowHeight = 0
         }
 
-        if atlasNextY + glyphHeight > atlasHeight {
-            // Atlas is full. In a real implementation we'd allocate a new atlas.
+        if atlasNextY + bitmapHeight > atlasHeight {
             let info = GlyphInfo(textureX: 0, textureY: 0, width: 0, height: 0, bearingX: 0, bearingY: 0)
             glyphCache[char] = info
             return info
         }
 
-        // Rasterize the glyph into a bitmap.
-        let bitmapWidth = Int(_cellSize.width)
-        let bitmapHeight = glyphHeight
+        // Rasterize the glyph into a bitmap at native pixel resolution.
         var pixelData = [UInt8](repeating: 0, count: bitmapWidth * bitmapHeight)
 
         let colorSpace = CGColorSpaceCreateDeviceGray()
@@ -191,15 +236,15 @@ public final class TerminalMetalRenderer: TerminalRenderer {
             return info
         }
 
-        let ascent = CTFontGetAscent(font)
+        let scaledAscent = CTFontGetAscent(scaledFont)
         context.setFillColor(gray: 0, alpha: 1)
         context.fill(CGRect(x: 0, y: 0, width: bitmapWidth, height: bitmapHeight))
 
         context.setFillColor(gray: 1, alpha: 1)
         context.textMatrix = .identity
 
-        let position = CGPoint(x: -boundingRect.origin.x, y: CGFloat(bitmapHeight) - ascent)
-        CTFontDrawGlyphs(font, [glyph], [position], 1, context)
+        let position = CGPoint(x: -boundingRect.origin.x, y: CGFloat(bitmapHeight) - scaledAscent)
+        CTFontDrawGlyphs(scaledFont, [glyph], [position], 1, context)
 
         // Upload to atlas texture.
         let region = MTLRegion(
@@ -218,8 +263,8 @@ public final class TerminalMetalRenderer: TerminalRenderer {
             textureY: atlasNextY,
             width: bitmapWidth,
             height: bitmapHeight,
-            bearingX: Float(boundingRect.origin.x),
-            bearingY: Float(ascent)
+            bearingX: Float(boundingRect.origin.x / scale),
+            bearingY: Float(scaledAscent / scale)
         )
 
         glyphCache[char] = info
@@ -299,10 +344,10 @@ public final class TerminalMetalRenderer: TerminalRenderer {
             for col in 0..<min(state.columns, line.cells.count) {
                 let cell = line.cells[col]
 
-                // Resolve colors.
+                // Resolve colors using theme palette.
                 let isInverse = cell.attributes.contains(.inverse)
-                var fgRGB = cell.fg.resolved(defaultColor: defaultFG)
-                var bgRGB = cell.bg.resolved(defaultColor: defaultBG)
+                var fgRGB = resolveColor(cell.fg, default: defaultFG)
+                var bgRGB = resolveColor(cell.bg, default: defaultBG)
                 if isInverse {
                     swap(&fgRGB, &bgRGB)
                 }
@@ -363,13 +408,37 @@ public final class TerminalMetalRenderer: TerminalRenderer {
             if cursorRow >= 0 && cursorRow < state.rows && cursorCol >= 0 && cursorCol < state.columns {
                 let x0 = Float(cursorCol) * cellW
                 let y0 = Float(cursorRow) * cellH
-                let x1 = x0 + cellW
-                let y1 = y0 + cellH
 
-                let cx0 = (x0 / viewW) * 2.0 - 1.0
-                let cy0 = 1.0 - (y0 / viewH) * 2.0
-                let cx1 = (x1 / viewW) * 2.0 - 1.0
-                let cy1 = 1.0 - (y1 / viewH) * 2.0
+                // Compute cursor rect based on style.
+                let cursorX0: Float
+                let cursorY0: Float
+                let cursorX1: Float
+                let cursorY1: Float
+
+                switch _cursorStyle {
+                case .block:
+                    cursorX0 = x0
+                    cursorY0 = y0
+                    cursorX1 = x0 + cellW
+                    cursorY1 = y0 + cellH
+                case .underline:
+                    let thickness = max(cellH * 0.1, 2.0)
+                    cursorX0 = x0
+                    cursorY0 = y0 + cellH - thickness
+                    cursorX1 = x0 + cellW
+                    cursorY1 = y0 + cellH
+                case .bar:
+                    let thickness = max(cellW * 0.12, 2.0)
+                    cursorX0 = x0
+                    cursorY0 = y0
+                    cursorX1 = x0 + thickness
+                    cursorY1 = y0 + cellH
+                }
+
+                let cx0 = (cursorX0 / viewW) * 2.0 - 1.0
+                let cy0 = 1.0 - (cursorY0 / viewH) * 2.0
+                let cx1 = (cursorX1 / viewW) * 2.0 - 1.0
+                let cy1 = 1.0 - (cursorY1 / viewH) * 2.0
 
                 let cursorFG = SIMD4<Float>(
                     Float(defaultBG.0) / 255.0,
@@ -381,10 +450,9 @@ public final class TerminalMetalRenderer: TerminalRenderer {
                     Float(cursorColor.0) / 255.0,
                     Float(cursorColor.1) / 255.0,
                     Float(cursorColor.2) / 255.0,
-                    0.85
+                    _cursorStyle == .block ? 0.85 : 1.0
                 )
 
-                // No glyph for cursor overlay — use zero UV.
                 let zeroUV = SIMD2<Float>(0, 0)
 
                 vertices.append(CellVertex(position: SIMD2(cx0, cy0), texCoord: zeroUV, fgColor: cursorFG, bgColor: cursorBG))
@@ -474,7 +542,7 @@ public final class TerminalMetalRenderer: TerminalRenderer {
         VertexOut in [[stage_in]],
         texture2d<float> glyphAtlas [[texture(0)]])
     {
-        constexpr sampler s(mag_filter::linear, min_filter::linear);
+        constexpr sampler s(mag_filter::nearest, min_filter::nearest);
         float glyphAlpha = glyphAtlas.sample(s, in.texCoord).r;
 
         // Composite: glyph foreground over background.
