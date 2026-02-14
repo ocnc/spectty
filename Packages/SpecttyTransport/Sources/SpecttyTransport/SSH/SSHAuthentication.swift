@@ -14,6 +14,7 @@ public enum SSHAuthMethod: Sendable {
 final class SSHPasswordDelegate: NIOSSHClientUserAuthenticationDelegate {
     private let username: String
     private let password: String
+    private var attempted = false
 
     init(username: String, password: String) {
         self.username = username
@@ -24,6 +25,13 @@ final class SSHPasswordDelegate: NIOSSHClientUserAuthenticationDelegate {
         availableMethods: NIOSSHAvailableUserAuthenticationMethods,
         nextChallengePromise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>
     ) {
+        // If we already tried, don't loop — auth was rejected.
+        guard !attempted else {
+            nextChallengePromise.fail(SSHTransportError.authenticationFailed)
+            return
+        }
+        attempted = true
+
         guard availableMethods.contains(.password) else {
             nextChallengePromise.fail(SSHTransportError.authenticationFailed)
             return
@@ -47,6 +55,7 @@ extension SSHPasswordDelegate: @unchecked Sendable {}
 final class SSHPublicKeyDelegate: NIOSSHClientUserAuthenticationDelegate {
     private let username: String
     private let privateKey: NIOSSHPrivateKey
+    private var attempted = false
 
     init(username: String, privateKey: NIOSSHPrivateKey) {
         self.username = username
@@ -57,6 +66,12 @@ final class SSHPublicKeyDelegate: NIOSSHClientUserAuthenticationDelegate {
         availableMethods: NIOSSHAvailableUserAuthenticationMethods,
         nextChallengePromise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>
     ) {
+        guard !attempted else {
+            nextChallengePromise.fail(SSHTransportError.authenticationFailed)
+            return
+        }
+        attempted = true
+
         guard availableMethods.contains(.publicKey) else {
             nextChallengePromise.fail(SSHTransportError.authenticationFailed)
             return

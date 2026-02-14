@@ -158,7 +158,7 @@ struct ConnectionListView: View {
                 connectionStore.save()
                 navigationPath.append(session.id)
             } catch {
-                connectionError = error.localizedDescription
+                connectionError = String(describing: error)
             }
         }
     }

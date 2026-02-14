@@ -19,20 +19,22 @@ public struct SSHConnectionConfig: Sendable {
 }
 
 /// Errors specific to the SSH transport layer.
-public enum SSHTransportError: Error, CustomStringConvertible {
+public enum SSHTransportError: Error, LocalizedError {
     case notConnected
     case alreadyConnected
     case authenticationFailed
     case channelCreationFailed
     case connectionClosed
+    case connectionFailed(String)
 
-    public var description: String {
+    public var errorDescription: String? {
         switch self {
         case .notConnected: return "SSH transport is not connected"
         case .alreadyConnected: return "SSH transport is already connected"
-        case .authenticationFailed: return "SSH authentication failed"
+        case .authenticationFailed: return "SSH authentication failed — check username and password"
         case .channelCreationFailed: return "Failed to create SSH channel"
         case .connectionClosed: return "SSH connection was closed"
+        case .connectionFailed(let detail): return "SSH connection failed: \(detail)"
         }
     }
 }
@@ -132,8 +134,11 @@ public final class SSHTransport: TerminalTransport, @unchecked Sendable {
         do {
             channel = try await bootstrap.connect(host: config.host, port: config.port).get()
         } catch {
-            stateContinuation.yield(.failed(error))
-            throw error
+            let wrapped = SSHTransportError.connectionFailed(
+                "Could not connect to \(config.host):\(config.port) — \(error)"
+            )
+            stateContinuation.yield(.failed(wrapped))
+            throw wrapped
         }
 
         self.parentChannel = channel
