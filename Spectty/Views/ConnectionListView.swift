@@ -9,6 +9,7 @@ struct ConnectionListView: View {
     @State private var showingQuickConnect = false
     @State private var quickConnectHost = ""
     @State private var navigationPath = NavigationPath()
+    @State private var connectionError: String?
 
     var body: some View {
         NavigationStack(path: $navigationPath) {
@@ -84,6 +85,13 @@ struct ConnectionListView: View {
             }
             .navigationTitle("Spectty")
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    NavigationLink {
+                        SettingsView()
+                    } label: {
+                        Image(systemName: "gear")
+                    }
+                }
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
                         Button {
@@ -129,6 +137,16 @@ struct ConnectionListView: View {
                     TerminalSessionView(session: session)
                 }
             }
+            .alert("Connection Failed", isPresented: .init(
+                get: { connectionError != nil },
+                set: { if !$0 { connectionError = nil } }
+            )) {
+                Button("OK") { connectionError = nil }
+            } message: {
+                if let error = connectionError {
+                    Text(error)
+                }
+            }
         }
     }
 
@@ -140,7 +158,7 @@ struct ConnectionListView: View {
                 connectionStore.save()
                 navigationPath.append(session.id)
             } catch {
-                // TODO: Show error alert
+                connectionError = error.localizedDescription
             }
         }
     }

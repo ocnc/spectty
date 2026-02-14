@@ -6,6 +6,9 @@ import SpecttyTransport
 struct TerminalSessionView: View {
     let session: TerminalSession
     @Environment(SessionManager.self) private var sessionManager
+    @Environment(\.dismiss) private var dismiss
+    @State private var showDisconnectConfirm = false
+    @FocusState private var terminalFocused: Bool
 
     var body: some View {
         ZStack {
@@ -21,6 +24,7 @@ struct TerminalSessionView: View {
                     session.resize(columns: columns, rows: rows)
                 }
             )
+            .focused($terminalFocused)
             .ignoresSafeArea(.keyboard)
 
             // Connection status overlay.
@@ -29,6 +33,13 @@ struct TerminalSessionView: View {
         .navigationTitle(session.title.isEmpty ? session.connectionName : session.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            ToolbarItem(placement: .secondaryAction) {
+                Button {
+                    terminalFocused.toggle()
+                } label: {
+                    Image(systemName: terminalFocused ? "keyboard.chevron.compact.down" : "keyboard")
+                }
+            }
             ToolbarItem(placement: .primaryAction) {
                 Menu {
                     Button {
@@ -39,8 +50,10 @@ struct TerminalSessionView: View {
                         Label("Paste", systemImage: "doc.on.clipboard")
                     }
 
+                    Divider()
+
                     Button(role: .destructive) {
-                        sessionManager.disconnect(session)
+                        showDisconnectConfirm = true
                     } label: {
                         Label("Disconnect", systemImage: "xmark.circle")
                     }
@@ -48,6 +61,16 @@ struct TerminalSessionView: View {
                     Image(systemName: "ellipsis.circle")
                 }
             }
+        }
+        .confirmationDialog("Disconnect from \(session.connectionName)?", isPresented: $showDisconnectConfirm, titleVisibility: .visible) {
+            Button("Disconnect", role: .destructive) {
+                sessionManager.disconnect(session)
+                dismiss()
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+        .onAppear {
+            terminalFocused = true
         }
     }
 
