@@ -10,11 +10,9 @@ struct SettingsView: View {
     var body: some View {
         Form {
             Section("Font") {
-                HStack {
-                    Text("Font")
-                    Spacer()
-                    Text(fontName)
-                        .foregroundStyle(.secondary)
+                Picker("Font", selection: $fontName) {
+                    Text("Menlo").tag("Menlo")
+                    Text("JetBrains Mono NF").tag("JetBrainsMonoNFM-Regular")
                 }
 
                 HStack {
