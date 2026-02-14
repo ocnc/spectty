@@ -25,6 +25,12 @@ public struct TerminalView: UIViewRepresentable {
         metalView.onKeyInput = onKeyInput
         metalView.onPaste = onPaste
         metalView.onResize = onResize
+
+        // Auto-focus once on creation to show the keyboard.
+        DispatchQueue.main.async {
+            metalView.becomeFirstResponder()
+        }
+
         return metalView
     }
 
@@ -32,12 +38,5 @@ public struct TerminalView: UIViewRepresentable {
         uiView.onKeyInput = onKeyInput
         uiView.onPaste = onPaste
         uiView.onResize = onResize
-
-        // Auto-focus the terminal to show the keyboard.
-        if !uiView.isFirstResponder {
-            DispatchQueue.main.async {
-                uiView.becomeFirstResponder()
-            }
-        }
     }
 }

@@ -833,7 +833,7 @@ public final class VTStateMachine: @unchecked Sendable {
         switch mode {
         case 5: // 256-color
             guard index + 1 < params.count else { return nil }
-            return (.indexed(UInt8(params[index + 1])), 2)
+            return (.indexed(UInt8(min(params[index + 1], 255))), 2)
         case 2: // True color
             guard index + 3 < params.count else { return nil }
             let r = UInt8(min(params[index + 1], 255))
