@@ -3,7 +3,7 @@ import SpecttyTerminal
 
 /// Input accessory bar providing Esc, Tab, Ctrl, Alt, arrow keys, and other
 /// common terminal keys above the iOS software keyboard.
-public final class TerminalInputAccessory: UIView {
+public final class TerminalInputAccessory: UIInputView {
     /// Callback when a virtual key is pressed.
     public var onKeyPress: ((KeyEvent) -> Void)?
 
@@ -18,8 +18,8 @@ public final class TerminalInputAccessory: UIView {
     private var altButton: UIButton?
     private let haptic = UIImpactFeedbackGenerator(style: .rigid)
 
-    public override init(frame: CGRect) {
-        super.init(frame: frame)
+    public init(frame: CGRect) {
+        super.init(frame: frame, inputViewStyle: .keyboard)
         setup()
     }
 
@@ -29,7 +29,7 @@ public final class TerminalInputAccessory: UIView {
     }
 
     private func setup() {
-        backgroundColor = UIColor.systemBackground.withAlphaComponent(0.95)
+        allowsSelfSizing = true
 
         scrollView.showsHorizontalScrollIndicator = false
         scrollView.showsVerticalScrollIndicator = false
@@ -42,7 +42,11 @@ public final class TerminalInputAccessory: UIView {
         stackView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.addSubview(stackView)
 
+        let heightConstraint = heightAnchor.constraint(equalToConstant: 44)
+        heightConstraint.priority = .defaultHigh
+
         NSLayoutConstraint.activate([
+            heightConstraint,
             scrollView.topAnchor.constraint(equalTo: topAnchor),
             scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
             scrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
