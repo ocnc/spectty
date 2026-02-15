@@ -43,6 +43,9 @@ public final class TextSelectionView: UIView {
     /// but the parent needs this to keep GestureHandler state in sync.
     public var onSelectionChanged: ((TerminalSelection?) -> Void)?
 
+    /// Callback to request the edit menu at a given point (in superview coordinates).
+    public var onShowMenu: ((CGPoint) -> Void)?
+
     public var selection: TerminalSelection? {
         didSet { setNeedsDisplay() }
     }
@@ -54,6 +57,9 @@ public final class TextSelectionView: UIView {
 
     private enum DragHandle { case start, end }
     private var activeHandle: DragHandle?
+    /// Last grid position during drag — only fire haptic when cell changes.
+    private var lastDragRow: Int = -1
+    private var lastDragCol: Int = -1
 
     /// Grab radius — how close a touch needs to be to a handle to grab it.
     private let handleHitRadius: CGFloat = 28
@@ -61,7 +67,7 @@ public final class TextSelectionView: UIView {
     private let handleRadius: CGFloat = 5
     private let handleStemHeight: CGFloat = 4
 
-    private let feedbackGenerator = UISelectionFeedbackGenerator()
+    private let feedbackGenerator = UIImpactFeedbackGenerator(style: .light)
 
     // MARK: - Init
 
@@ -217,8 +223,9 @@ public final class TextSelectionView: UIView {
             let distStart = hypot(point.x - startCenter.x, point.y - startCenter.y)
             let distEnd = hypot(point.x - endCenter.x, point.y - endCenter.y)
             activeHandle = distStart < distEnd ? .start : .end
+            lastDragRow = row
+            lastDragCol = col
             feedbackGenerator.prepare()
-            feedbackGenerator.selectionChanged()
 
         case .changed:
             guard let handle = activeHandle else { return }
@@ -230,28 +237,26 @@ public final class TextSelectionView: UIView {
                 sel.endRow = row
                 sel.endCol = col
             }
-            // Store un-normalized so the handle you're dragging stays as start/end.
             selection = sel
             onSelectionChanged?(sel)
-            feedbackGenerator.selectionChanged()
+            // Only fire haptic when the selection moves to a different cell.
+            if row != lastDragRow || col != lastDragCol {
+                lastDragRow = row
+                lastDragCol = col
+                feedbackGenerator.impactOccurred(intensity: 0.5)
+            }
 
         case .ended, .cancelled, .failed:
             activeHandle = nil
+            lastDragRow = -1
+            lastDragCol = -1
 
             // Show copy menu after handle drag finishes.
             if gesture.state == .ended, let sel = selection?.normalized {
                 let midRow = (sel.startRow + sel.endRow) / 2
-                let menuRect = CGRect(
-                    x: CGFloat(sel.startCol) * cellSize.width,
-                    y: CGFloat(midRow) * cellSize.height,
-                    width: CGFloat(sel.endCol - sel.startCol + 1) * cellSize.width,
-                    height: cellSize.height
-                )
-                // Find the parent responder to show the menu from.
-                if let parent = superview {
-                    let menu = UIMenuController.shared
-                    menu.showMenu(from: parent, rect: menuRect)
-                }
+                let centerX = CGFloat(sel.startCol + sel.endCol + 1) / 2.0 * cellSize.width
+                let centerY = CGFloat(midRow) * cellSize.height + cellSize.height / 2.0
+                onShowMenu?(CGPoint(x: centerX, y: centerY))
             }
 
         default:

@@ -16,6 +16,9 @@ public final class GestureHandler: NSObject {
     /// Callback for text selection changes (nil = selection cleared).
     public var onSelectionChanged: ((TerminalSelection?) -> Void)?
 
+    /// Callback to request the edit menu (copy/paste) at a given point.
+    public var onShowMenu: ((CGPoint) -> Void)?
+
     private var panGesture: UIPanGestureRecognizer?
     private var pinchGesture: UIPinchGestureRecognizer?
     private var longPressGesture: UILongPressGestureRecognizer?
@@ -24,7 +27,7 @@ public final class GestureHandler: NSObject {
     private var initialFontSize: CGFloat = 14
     private var currentSelectionStart: (row: Int, col: Int)?
     private var currentSelection: TerminalSelection?
-    private let selectionFeedback = UISelectionFeedbackGenerator()
+    private let selectionFeedback = UIImpactFeedbackGenerator(style: .light)
 
     public init(metalView: TerminalMetalView, emulator: any TerminalEmulator) {
         self.metalView = metalView
@@ -131,7 +134,7 @@ public final class GestureHandler: NSObject {
         case .began:
             metalView.becomeFirstResponder()
             selectionFeedback.prepare()
-            selectionFeedback.selectionChanged()
+            selectionFeedback.impactOccurred()
             currentSelectionStart = (row: row, col: col)
             let sel = TerminalSelection(startRow: row, startCol: col, endRow: row, endCol: col)
             currentSelection = sel
@@ -151,7 +154,7 @@ public final class GestureHandler: NSObject {
         case .ended:
             currentSelectionStart = nil
             // Show copy menu centered on the selection.
-            showSelectionMenu(on: metalView)
+            requestMenu()
 
         case .cancelled, .failed:
             currentSelectionStart = nil
@@ -163,22 +166,17 @@ public final class GestureHandler: NSObject {
         }
     }
 
-    /// Shows the UIMenuController centered on the current selection highlight.
-    private func showSelectionMenu(on view: UIView) {
+    /// Request the edit menu centered on the current selection.
+    private func requestMenu() {
         guard let sel = currentSelection else { return }
         guard let metalView = metalView else { return }
         let cellSize = metalView.cellSize
         let norm = sel.normalized
 
         let midRow = (norm.startRow + norm.endRow) / 2
-        let menuRect = CGRect(
-            x: CGFloat(norm.startCol) * cellSize.width,
-            y: CGFloat(midRow) * cellSize.height,
-            width: CGFloat(norm.endCol - norm.startCol + 1) * cellSize.width,
-            height: cellSize.height
-        )
-        let menu = UIMenuController.shared
-        menu.showMenu(from: view, rect: menuRect)
+        let centerX = CGFloat(norm.startCol + norm.endCol + 1) / 2.0 * cellSize.width
+        let centerY = CGFloat(midRow) * cellSize.height + cellSize.height / 2.0
+        onShowMenu?(CGPoint(x: centerX, y: centerY))
     }
 
     /// Update the tracked selection (e.g. when handles are dragged externally).

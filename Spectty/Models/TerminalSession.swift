@@ -26,10 +26,11 @@ final class TerminalSession: Identifiable {
         self.transport = transport
 
         // Wire terminal responses (DSR, DA) back through the transport.
-        self.emulator.onResponse = { [weak self] data in
-            Task { @MainActor [weak self] in
-                self?.sendData(data)
-            }
+        // Capture transport directly — avoids accessing @MainActor self
+        // from a non-isolated closure, which would trigger unsafeForcedSync.
+        let transport = self.transport
+        self.emulator.onResponse = { data in
+            Task { try? await transport.send(data) }
         }
     }
 

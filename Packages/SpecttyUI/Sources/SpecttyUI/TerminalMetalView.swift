@@ -43,6 +43,9 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
     /// Text selection overlay.
     private let selectionView = TextSelectionView()
 
+    /// Edit menu interaction (replaces deprecated UIMenuController).
+    private var editMenuInteraction: UIEditMenuInteraction?
+
     /// Visual bell flash layer.
     private var bellLayer: CALayer?
 
@@ -77,6 +80,12 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
         selectionView.frame = bounds
         addSubview(selectionView)
 
+        // Edit menu interaction for copy/paste — nil delegate uses default
+        // behavior, building the menu from canPerformAction/copy/paste.
+        let interaction = UIEditMenuInteraction(delegate: nil)
+        addInteraction(interaction)
+        self.editMenuInteraction = interaction
+
         // Tap to focus and show keyboard.
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
         addGestureRecognizer(tap)
@@ -86,7 +95,7 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
         // Clear any active selection on tap.
         if selectionView.selection != nil {
             selectionView.selection = nil
-            UIMenuController.shared.hideMenu()
+            editMenuInteraction?.dismissMenu()
             return
         }
 
@@ -107,12 +116,29 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
             self.selectionView.cellSize = self.cellSize
             self.selectionView.selection = selection
         }
+        handler.onShowMenu = { [weak self] point in
+            self?.presentEditMenu(at: point)
+        }
         // Handle-drag updates from the selection overlay.
         selectionView.onSelectionChanged = { [weak self, weak handler] selection in
             handler?.updateSelection(selection)
             self?.selectionView.cellSize = self?.cellSize ?? .zero
         }
+        selectionView.onShowMenu = { [weak self] point in
+            self?.presentEditMenu(at: point)
+        }
         self.gestureHandler = handler
+    }
+
+    /// Present the edit menu at the given point in this view's coordinates.
+    /// Deferred to the next run loop tick so UIKit finishes processing the
+    /// gesture touch (avoids nil-window warnings and unsafeForcedSync).
+    private func presentEditMenu(at point: CGPoint) {
+        Task { @MainActor [weak self] in
+            guard let self, self.selectionView.selection != nil else { return }
+            let config = UIEditMenuConfiguration(identifier: nil, sourcePoint: point)
+            self.editMenuInteraction?.presentEditMenu(with: config)
+        }
     }
 
     // MARK: - First Responder + Software Keyboard
@@ -446,3 +472,5 @@ extension TerminalMetalView: MTKViewDelegate {
         renderer.render(to: renderPassDescriptor, drawable: drawable)
     }
 }
+
+
