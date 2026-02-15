@@ -115,7 +115,3 @@ Requires Xcode 26.2+, iOS 18+ deployment target.
 ```bash
 xcodebuild build -scheme Spectty -destination 'generic/platform=iOS'
 ```
-
-## License
-
-MIT
