@@ -38,7 +38,7 @@ final class SessionManager {
         case .ssh:
             transport = SSHTransport(config: config)
         case .mosh:
-            transport = MoshTransport()
+            transport = MoshTransport(config: config)
         }
 
         let scrollbackLines = UserDefaults.standard.integer(forKey: "scrollbackLines")
