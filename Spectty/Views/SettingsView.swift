@@ -60,6 +60,8 @@ struct SettingsView: View {
                 NavigationLink("Acknowledgements") {
                     AcknowledgementsView()
                 }
+                Link("Privacy Policy", destination: URL(string: "https://github.com/ocnc/spectty/blob/main/PRIVACY.md")!)
+                Link("Terms of Service", destination: URL(string: "https://github.com/ocnc/spectty/blob/main/TERMS.md")!)
             }
         }
         .navigationTitle("Settings")
