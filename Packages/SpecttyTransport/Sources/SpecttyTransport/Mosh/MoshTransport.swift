@@ -6,6 +6,7 @@ public enum MoshError: Error, LocalizedError {
     case bootstrapFailed(String)
     case connectionClosed
     case notConnected
+    case serverUnreachable
 
     public var errorDescription: String? {
         switch self {
@@ -17,6 +18,8 @@ public enum MoshError: Error, LocalizedError {
             return "Mosh connection was closed"
         case .notConnected:
             return "Mosh transport is not connected"
+        case .serverUnreachable:
+            return "Mosh server is unreachable"
         }
     }
 }
@@ -26,7 +29,7 @@ public enum MoshError: Error, LocalizedError {
 /// Connects by: SSH exec → mosh-server → parse key+port → UDP/OCB3/SSP.
 /// The SSP receiver emits `HostBytes` (raw terminal output) through the
 /// `incomingData` stream, which feeds the Ghostty terminal emulator.
-public final class MoshTransport: TerminalTransport, @unchecked Sendable {
+public final class MoshTransport: ResumableTransport, @unchecked Sendable {
     public let state: AsyncStream<TransportState>
     public let incomingData: AsyncStream<Data>
 
@@ -37,9 +40,28 @@ public final class MoshTransport: TerminalTransport, @unchecked Sendable {
     nonisolated(unsafe) private var network: MoshNetwork?
     nonisolated(unsafe) private var ssp: MoshSSP?
     nonisolated(unsafe) private var sessionUDPPort: Int?
+    nonisolated(unsafe) private var sessionKey: String?
+    nonisolated(unsafe) private var sessionHost: String?
+
+    /// Saved state for session resumption (set via `init(resuming:config:)`).
+    nonisolated(unsafe) private var savedState: MoshSessionState?
 
     public init(config: SSHConnectionConfig) {
         self.config = config
+
+        var sc: AsyncStream<TransportState>.Continuation!
+        self.state = AsyncStream { sc = $0 }
+        self.stateContinuation = sc
+
+        var dc: AsyncStream<Data>.Continuation!
+        self.incomingData = AsyncStream { dc = $0 }
+        self.dataContinuation = dc
+    }
+
+    /// Create a transport for resuming a saved session (skips SSH bootstrap).
+    public init(resuming savedState: MoshSessionState, config: SSHConnectionConfig) {
+        self.config = config
+        self.savedState = savedState
 
         var sc: AsyncStream<TransportState>.Continuation!
         self.state = AsyncStream { sc = $0 }
@@ -60,6 +82,13 @@ public final class MoshTransport: TerminalTransport, @unchecked Sendable {
     // MARK: - TerminalTransport
 
     public func connect() async throws {
+        // If we have saved state, do a resume instead of fresh bootstrap
+        if let saved = savedState {
+            savedState = nil
+            try await reconnect(from: saved)
+            return
+        }
+
         stateContinuation.yield(.connecting)
 
         // Phase 1: SSH bootstrap — exec mosh-server to get UDP port + key
@@ -73,6 +102,8 @@ public final class MoshTransport: TerminalTransport, @unchecked Sendable {
             throw error
         }
         self.sessionUDPPort = session.udpPort
+        self.sessionKey = session.key
+        self.sessionHost = session.host
 
         // Phase 2: Set up crypto with the session key
         let crypto: MoshCryptoSession
@@ -93,7 +124,11 @@ public final class MoshTransport: TerminalTransport, @unchecked Sendable {
             stateContinuation.yield(.failed(error))
             throw error
         }
-        // Phase 4: Start SSP
+
+        // Phase 4: Install roaming handlers
+        installRoamingHandlers(on: net)
+
+        // Phase 5: Start SSP
         let ssp = MoshSSP(network: net)
         self.ssp = ssp
 
@@ -136,5 +171,119 @@ public final class MoshTransport: TerminalTransport, @unchecked Sendable {
             return // Not connected yet; will be set after connect
         }
         ssp.queueResize(columns: columns, rows: rows)
+    }
+
+    // MARK: - Session State Export
+
+    /// Export current session state for persistence. Returns nil if not connected.
+    public func exportSessionState(
+        sessionID: String,
+        connectionID: String,
+        connectionName: String
+    ) -> MoshSessionState? {
+        guard let ssp, let host = sessionHost, let port = sessionUDPPort, let key = sessionKey else {
+            return nil
+        }
+        let sspState = ssp.exportState()
+        return MoshSessionState(
+            sessionID: sessionID,
+            connectionID: connectionID,
+            connectionName: connectionName,
+            host: host,
+            udpPort: port,
+            key: key,
+            senderCurrentNum: sspState.senderCurrentNum,
+            senderAckedNum: sspState.senderAckedNum,
+            receiverCurrentNum: sspState.receiverCurrentNum,
+            sshHost: config.host,
+            sshPort: config.port,
+            sshUsername: config.username,
+            savedAt: Date()
+        )
+    }
+
+    // MARK: - Reconnect (Session Resumption)
+
+    /// Reconnect to a saved mosh session, skipping SSH bootstrap entirely.
+    private func reconnect(from saved: MoshSessionState) async throws {
+        stateContinuation.yield(.reconnecting)
+
+        // Recreate crypto from saved key
+        let crypto: MoshCryptoSession
+        do {
+            crypto = try MoshCryptoSession(base64Key: saved.key)
+        } catch {
+            stateContinuation.yield(.failed(error))
+            throw error
+        }
+
+        self.sessionKey = saved.key
+        self.sessionHost = saved.host
+        self.sessionUDPPort = saved.udpPort
+
+        // Create UDP connection to saved host:port
+        let net = MoshNetwork(host: saved.host, port: saved.udpPort, crypto: crypto)
+        self.network = net
+
+        do {
+            try await net.start()
+        } catch {
+            stateContinuation.yield(.failed(error))
+            throw error
+        }
+
+        // Install roaming handlers
+        installRoamingHandlers(on: net)
+
+        // Create SSP and import saved state
+        let ssp = MoshSSP(network: net)
+        self.ssp = ssp
+
+        ssp.importState(MoshSSP.SSPState(
+            senderCurrentNum: saved.senderCurrentNum,
+            senderAckedNum: saved.senderAckedNum,
+            receiverCurrentNum: saved.receiverCurrentNum
+        ))
+
+        ssp.onHostBytes = { [weak self] data in
+            self?.dataContinuation.yield(data)
+        }
+
+        ssp.start()
+
+        // Wait for a server packet within timeout to confirm the session is alive.
+        // Poll the SSP's hasReceivedServerPacket flag rather than consuming incomingData
+        // (which is already consumed by TerminalSession).
+        let deadline = Date().addingTimeInterval(10)
+        while Date() < deadline {
+            if ssp.hasReceivedServerPacket {
+                stateContinuation.yield(.connected)
+                return
+            }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+
+        // Server didn't respond — clean up
+        ssp.stop()
+        self.ssp = nil
+        net.stop()
+        self.network = nil
+        let error = MoshError.serverUnreachable
+        stateContinuation.yield(.failed(error))
+        throw error
+    }
+
+    // MARK: - Roaming
+
+    private func installRoamingHandlers(on net: MoshNetwork) {
+        net.onViabilityChanged = { [weak self] viable in
+            guard let self else { return }
+            if viable {
+                self.stateContinuation.yield(.connected)
+                self.ssp?.forceRetransmit()
+            } else {
+                self.stateContinuation.yield(.reconnecting)
+            }
+        }
     }
 }

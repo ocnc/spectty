@@ -47,8 +47,43 @@ final class MoshSSP: @unchecked Sendable {
     /// Called when the server requests a resize.
     var onResize: ((Int, Int) -> Void)?
 
+    /// Set to true when any valid server packet is received. Used by reconnect
+    /// logic to determine if the server is still alive.
+    private var _hasReceivedServerPacket = false
+    var hasReceivedServerPacket: Bool {
+        queue.sync { _hasReceivedServerPacket }
+    }
+
+    /// Snapshot of SSP sequence numbers for session persistence.
+    struct SSPState: Sendable {
+        let senderCurrentNum: UInt64
+        let senderAckedNum: UInt64
+        let receiverCurrentNum: UInt64
+    }
+
     init(network: MoshNetwork) {
         self.network = network
+    }
+
+    /// Export current SSP sequence state for session persistence.
+    func exportState() -> SSPState {
+        queue.sync {
+            SSPState(
+                senderCurrentNum: senderCurrentNum,
+                senderAckedNum: senderAckedNum,
+                receiverCurrentNum: receiverCurrentNum
+            )
+        }
+    }
+
+    /// Import saved SSP sequence state for session resumption.
+    /// Unacked data from the previous session is lost (acceptable trade-off).
+    func importState(_ state: SSPState) {
+        queue.sync {
+            senderCurrentNum = state.senderCurrentNum
+            senderAckedNum = state.senderAckedNum
+            receiverCurrentNum = state.receiverCurrentNum
+        }
     }
 
     /// Start the SSP: set up receive handling and heartbeat.
@@ -66,6 +101,11 @@ final class MoshSSP: @unchecked Sendable {
         heartbeatTask?.cancel()
         heartbeatTask = nil
         network.onReceive = nil
+    }
+
+    /// Force an immediate retransmit — reduces recovery latency after a path change.
+    func forceRetransmit() {
+        queue.sync { sendPacket() }
     }
 
     /// Queue keystrokes to be sent to the server.
@@ -135,6 +175,8 @@ final class MoshSSP: @unchecked Sendable {
 
     private func handleServerPacket(_ packet: MoshPacket) {
         queue.sync {
+            _hasReceivedServerPacket = true
+
             // Update remote timestamp tracking for RTT
             lastRemoteTimestamp = packet.timestamp
             lastRemoteTimestampReceived = Date()

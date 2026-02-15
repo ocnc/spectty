@@ -4,6 +4,7 @@ import SwiftData
 @main
 struct SpecttyApp: App {
     @State private var sessionManager = SessionManager()
+    @Environment(\.scenePhase) private var scenePhase
 
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([ServerConnection.self])
@@ -19,8 +20,18 @@ struct SpecttyApp: App {
         WindowGroup {
             ContentRoot()
                 .environment(sessionManager)
+                .task {
+                    await sessionManager.loadResumableSessions()
+                }
         }
         .modelContainer(sharedModelContainer)
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .background {
+                Task { @MainActor in
+                    await sessionManager.saveActiveSessions()
+                }
+            }
+        }
     }
 }
 

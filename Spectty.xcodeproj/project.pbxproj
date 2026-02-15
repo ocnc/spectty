@@ -7,12 +7,12 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A0000001AAAA000000000006 /* Package.resolved in Resources */ = {isa = PBXBuildFile; fileRef = A0000004AAAA000000000001 /* Package.resolved */; };
 		A0000001AAAA000000000001 /* SpecttyTerminal in Frameworks */ = {isa = PBXBuildFile; productRef = A0000002AAAA000000000001 /* SpecttyTerminal */; };
 		A0000001AAAA000000000002 /* SpecttyTransport in Frameworks */ = {isa = PBXBuildFile; productRef = A0000002AAAA000000000002 /* SpecttyTransport */; };
 		A0000001AAAA000000000003 /* SpecttyUI in Frameworks */ = {isa = PBXBuildFile; productRef = A0000002AAAA000000000003 /* SpecttyUI */; };
 		A0000001AAAA000000000004 /* SpecttyKeychain in Frameworks */ = {isa = PBXBuildFile; productRef = A0000002AAAA000000000004 /* SpecttyKeychain */; };
 		A0000001AAAA000000000005 /* AcknowList in Frameworks */ = {isa = PBXBuildFile; productRef = A0000002AAAA000000000005 /* AcknowList */; };
+		A0000001AAAA000000000006 /* Package.resolved in Resources */ = {isa = PBXBuildFile; fileRef = A0000004AAAA000000000001 /* Package.resolved */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */

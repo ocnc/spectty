@@ -45,3 +45,14 @@ public protocol TerminalTransport: AnyObject, Sendable {
     /// Notify the remote host that the terminal has been resized.
     func resize(columns: Int, rows: Int) async throws
 }
+
+/// Capability protocol for transports that support session persistence
+/// and resumption across app restarts (e.g. Mosh).
+public protocol ResumableTransport: TerminalTransport {
+    /// Export the current session state for persistence. Returns nil if not connected.
+    func exportSessionState(
+        sessionID: String,
+        connectionID: String,
+        connectionName: String
+    ) -> MoshSessionState?
+}
