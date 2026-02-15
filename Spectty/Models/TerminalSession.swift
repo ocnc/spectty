@@ -14,7 +14,9 @@ final class TerminalSession: Identifiable {
     private(set) var transportState: TransportState = .disconnected
     private(set) var title: String = ""
 
+    @ObservationIgnored
     nonisolated(unsafe) private var receiveTask: Task<Void, Never>?
+    @ObservationIgnored
     nonisolated(unsafe) private var stateTask: Task<Void, Never>?
 
     init(id: UUID = UUID(), connectionName: String, transport: any TerminalTransport, columns: Int = 80, rows: Int = 24, scrollbackCapacity: Int = 10_000) {
@@ -25,8 +27,9 @@ final class TerminalSession: Identifiable {
 
         // Wire terminal responses (DSR, DA) back through the transport.
         self.emulator.onResponse = { [weak self] data in
-            guard let self else { return }
-            self.sendData(data)
+            Task { @MainActor [weak self] in
+                self?.sendData(data)
+            }
         }
     }
 

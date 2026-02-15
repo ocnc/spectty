@@ -93,6 +93,21 @@ public final class TerminalScreenState: @unchecked Sendable {
         self.tabStops = Set(stride(from: 8, to: columns, by: 8))
     }
 
+    /// Extract all visible text as a string, trimming trailing whitespace per line.
+    public func text() -> String {
+        var result = [String]()
+        for line in lines {
+            let lineText = String(line.cells.map { $0.character })
+                .replacingOccurrences(of: "\0", with: " ")
+            result.append(lineText.replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression))
+        }
+        // Trim trailing empty lines.
+        while result.last?.isEmpty == true {
+            result.removeLast()
+        }
+        return result.joined(separator: "\n")
+    }
+
     /// Reset the screen to blank.
     public func reset() {
         for i in 0..<rows {
@@ -166,8 +181,29 @@ public final class TerminalState: @unchecked Sendable {
 
         // Add or remove lines as needed.
         if rows > oldRows {
-            for _ in oldRows..<rows {
-                screen.lines.append(TerminalLine(columns: columns))
+            let needed = rows - oldRows
+            if screen === primaryScreen {
+                // Pull lines back from scrollback to restore content.
+                var recovered = [TerminalLine]()
+                for _ in 0..<needed {
+                    if var line = scrollback.popLast() {
+                        line.resize(columns: columns)
+                        recovered.insert(line, at: 0)
+                    } else {
+                        break
+                    }
+                }
+                screen.lines.insert(contentsOf: recovered, at: 0)
+                screen.cursor.row += recovered.count
+                // Fill any remaining with blank lines.
+                let remaining = needed - recovered.count
+                for _ in 0..<remaining {
+                    screen.lines.append(TerminalLine(columns: columns))
+                }
+            } else {
+                for _ in oldRows..<rows {
+                    screen.lines.append(TerminalLine(columns: columns))
+                }
             }
         } else if rows < oldRows {
             // Remove lines from the top, pushing them to scrollback if primary.

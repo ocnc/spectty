@@ -39,6 +39,19 @@ public struct TerminalBuffer: Sendable {
         return storage[storageIndex]
     }
 
+    /// Remove and return the most recent line from the buffer.
+    public mutating func popLast() -> TerminalLine? {
+        guard _count > 0 else { return nil }
+        if storage.count < capacity {
+            _count -= 1
+            return storage.removeLast()
+        } else {
+            let newestIndex = (head + _count - 1) % capacity
+            _count -= 1
+            return storage[newestIndex]
+        }
+    }
+
     /// Clear the scrollback buffer.
     public mutating func clear() {
         storage.removeAll(keepingCapacity: true)
