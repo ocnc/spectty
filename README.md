@@ -1,6 +1,12 @@
-# Spectty
+<p align="center">
+  <img src=".github/icon.png" width="128" height="128" alt="Spectty icon">
+</p>
 
-An iOS SSH client built on [libghostty-vt](https://github.com/ghostty-org/ghostty) with a custom Metal renderer and clean-room Mosh implementation.
+<h1 align="center">Spectty</h1>
+
+<p align="center">
+  An iOS SSH client built on <a href="https://github.com/ghostty-org/ghostty">libghostty-vt</a> with a custom Metal renderer and clean-room Mosh implementation.
+</p>
 
 ## Status
 
