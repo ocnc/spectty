@@ -18,7 +18,7 @@ public struct TerminalFont: Sendable {
 
 /// Protocol for terminal renderers (allows swapping Metal impl for libghostty's renderer later).
 public protocol TerminalRenderer: AnyObject {
-    func update(state: TerminalScreenState, scrollback: TerminalBuffer, scrollOffset: Int)
+    func update(state: TerminalScreenState, scrollback: TerminalBuffer, scrollOffset: Int, viewportSize: CGSize)
     func setFont(_ font: TerminalFont)
     var cellSize: CGSize { get }
 }
@@ -305,13 +305,16 @@ public final class TerminalMetalRenderer: TerminalRenderer {
 
     // MARK: - Update State
 
-    public func update(state: TerminalScreenState, scrollback: TerminalBuffer, scrollOffset: Int) {
+    public func update(state: TerminalScreenState, scrollback: TerminalBuffer, scrollOffset: Int, viewportSize: CGSize) {
         // Build vertex data for all visible cells.
         var vertices: [CellVertex] = []
         vertices.reserveCapacity(state.columns * state.rows * 6) // 6 vertices per cell (2 triangles)
 
-        let viewW = Float(state.columns) * Float(_cellSize.width)
-        let viewH = Float(state.rows) * Float(_cellSize.height)
+        // Use actual viewport size for clip-space mapping so content stays
+        // at its natural pixel position during view resize animations
+        // instead of stretching to fill the drawable.
+        let viewW = max(Float(viewportSize.width), 1)
+        let viewH = max(Float(viewportSize.height), 1)
         let cellW = Float(_cellSize.width)
         let cellH = Float(_cellSize.height)
 

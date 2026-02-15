@@ -442,7 +442,7 @@ extension TerminalMetalView: MTKViewDelegate {
         else { return }
 
         let state = emulator.state.activeScreen
-        renderer.update(state: state, scrollback: emulator.state.scrollback, scrollOffset: scrollOffset)
+        renderer.update(state: state, scrollback: emulator.state.scrollback, scrollOffset: scrollOffset, viewportSize: bounds.size)
         renderer.render(to: renderPassDescriptor, drawable: drawable)
     }
 }
