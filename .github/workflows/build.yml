@@ -1,0 +1,17 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: self-hosted
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: xcodebuild build -project Spectty.xcodeproj -scheme Spectty -destination 'generic/platform=iOS Simulator' -quiet

@@ -8,9 +8,11 @@
   An iOS SSH client built on <a href="https://github.com/ghostty-org/ghostty">libghostty-vt</a> with a custom Metal renderer and clean-room Mosh implementation.
 </p>
 
-## Status
-
-**Functional** — terminal emulation, Metal rendering, SSH transport, key management, Mosh (clean-room Swift), network roaming, and session resumption are all working.
+<p align="center">
+  <img src="https://img.shields.io/badge/platform-iOS_18%2B-blue?logo=apple" alt="Platform">
+  <img src="https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white" alt="Swift 6">
+  <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
+</p>
 
 ## Architecture
 
@@ -104,15 +106,6 @@ The architecture is designed so libghostty components can be swapped in incremen
 - **Rendering**: Replace `TerminalMetalRenderer` with libghostty's Metal rendering C API — `TerminalRenderer` protocol insulates everything else
 
 Each swap is independent. No big-bang migration needed.
-
-## Dependencies
-
-| Package | License |
-|---------|---------|
-| [swift-nio](https://github.com/apple/swift-nio) | Apache-2.0 |
-| [swift-nio-ssh](https://github.com/apple/swift-nio-ssh) | Apache-2.0 |
-
-No other third-party dependencies.
 
 ## Build
 
