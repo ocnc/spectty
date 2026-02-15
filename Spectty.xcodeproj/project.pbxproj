@@ -7,14 +7,17 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A0000001AAAA000000000006 /* Package.resolved in Resources */ = {isa = PBXBuildFile; fileRef = A0000004AAAA000000000001 /* Package.resolved */; };
 		A0000001AAAA000000000001 /* SpecttyTerminal in Frameworks */ = {isa = PBXBuildFile; productRef = A0000002AAAA000000000001 /* SpecttyTerminal */; };
 		A0000001AAAA000000000002 /* SpecttyTransport in Frameworks */ = {isa = PBXBuildFile; productRef = A0000002AAAA000000000002 /* SpecttyTransport */; };
 		A0000001AAAA000000000003 /* SpecttyUI in Frameworks */ = {isa = PBXBuildFile; productRef = A0000002AAAA000000000003 /* SpecttyUI */; };
 		A0000001AAAA000000000004 /* SpecttyKeychain in Frameworks */ = {isa = PBXBuildFile; productRef = A0000002AAAA000000000004 /* SpecttyKeychain */; };
+		A0000001AAAA000000000005 /* AcknowList in Frameworks */ = {isa = PBXBuildFile; productRef = A0000002AAAA000000000005 /* AcknowList */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		8E69C2322F40460400614CEC /* Spectty.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Spectty.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A0000004AAAA000000000001 /* Package.resolved */ = {isa = PBXFileReference; lastKnownFileType = text; name = Package.resolved; path = Spectty.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -34,6 +37,7 @@
 				A0000001AAAA000000000002 /* SpecttyTransport in Frameworks */,
 				A0000001AAAA000000000003 /* SpecttyUI in Frameworks */,
 				A0000001AAAA000000000004 /* SpecttyKeychain in Frameworks */,
+				A0000001AAAA000000000005 /* AcknowList in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -44,6 +48,7 @@
 			isa = PBXGroup;
 			children = (
 				8E69C2342F40460400614CEC /* Spectty */,
+				A0000004AAAA000000000001 /* Package.resolved */,
 				8E69C2332F40460400614CEC /* Products */,
 			);
 			sourceTree = "<group>";
@@ -80,6 +85,7 @@
 				A0000002AAAA000000000002 /* SpecttyTransport */,
 				A0000002AAAA000000000003 /* SpecttyUI */,
 				A0000002AAAA000000000004 /* SpecttyKeychain */,
+				A0000002AAAA000000000005 /* AcknowList */,
 			);
 			productName = Spectty;
 			productReference = 8E69C2322F40460400614CEC /* Spectty.app */;
@@ -114,6 +120,7 @@
 				A0000003AAAA000000000002 /* XCLocalSwiftPackageReference "Packages/SpecttyTransport" */,
 				A0000003AAAA000000000003 /* XCLocalSwiftPackageReference "Packages/SpecttyUI" */,
 				A0000003AAAA000000000004 /* XCLocalSwiftPackageReference "Packages/SpecttyKeychain" */,
+				A0000003AAAA000000000005 /* XCRemoteSwiftPackageReference "AcknowList" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 8E69C2332F40460400614CEC /* Products */;
@@ -130,6 +137,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A0000001AAAA000000000006 /* Package.resolved in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -375,6 +383,17 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		A0000003AAAA000000000005 /* XCRemoteSwiftPackageReference "AcknowList" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/vtourraine/AcknowList.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 3.2.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		A0000002AAAA000000000001 /* SpecttyTerminal */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -391,6 +410,11 @@
 		A0000002AAAA000000000004 /* SpecttyKeychain */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = SpecttyKeychain;
+		};
+		A0000002AAAA000000000005 /* AcknowList */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A0000003AAAA000000000005 /* XCRemoteSwiftPackageReference "AcknowList" */;
+			productName = AcknowList;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

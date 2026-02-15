@@ -57,6 +57,9 @@ struct SettingsView: View {
                     Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")
                         .foregroundStyle(.secondary)
                 }
+                NavigationLink("Acknowledgements") {
+                    AcknowledgementsView()
+                }
             }
         }
         .navigationTitle("Settings")
