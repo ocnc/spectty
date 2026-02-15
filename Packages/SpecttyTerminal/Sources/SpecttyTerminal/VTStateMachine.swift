@@ -4,8 +4,8 @@ import Foundation
 /// Parses raw byte streams and applies mutations to TerminalState.
 ///
 /// This is a custom parser implementing the standard VT state machine
-/// (per https://vt100.net/emu/dec_ansi_parser). In the future, the
-/// parsing can be delegated to libghostty-vt's C API.
+/// (per https://vt100.net/emu/dec_ansi_parser). The `TerminalEmulator`
+/// protocol allows swapping this for libghostty-vt's C API.
 public final class VTStateMachine: @unchecked Sendable {
     private let terminalState: TerminalState
 

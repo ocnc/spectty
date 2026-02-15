@@ -3,7 +3,7 @@ import Foundation
 /// Encodes key events into escape sequences for the terminal.
 ///
 /// This is a Swift implementation that handles standard xterm key encoding.
-/// In the future, this can delegate to libghostty-vt's `ghostty_key_encode`.
+/// Can be swapped for libghostty-vt's `ghostty_key_encode` via the same interface.
 public struct KeyEncoder: Sendable {
     public init() {}
 

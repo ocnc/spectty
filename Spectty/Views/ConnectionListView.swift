@@ -1,7 +1,6 @@
 import SwiftUI
 import SwiftData
 import SpecttyKeychain
-import SpecttyTransport
 
 struct ConnectionListView: View {
     @Environment(SessionManager.self) private var sessionManager
@@ -21,42 +20,6 @@ struct ConnectionListView: View {
     var body: some View {
         NavigationStack(path: $navigationPath) {
             List {
-                if !sessionManager.resumableSessions.isEmpty {
-                    Section("Resumable Sessions") {
-                        ForEach(sessionManager.resumableSessions, id: \.sessionID) { saved in
-                            Button {
-                                resumeSession(saved)
-                            } label: {
-                                HStack {
-                                    Image(systemName: "arrow.clockwise.circle")
-                                        .foregroundStyle(.orange)
-                                    VStack(alignment: .leading) {
-                                        Text(saved.connectionName)
-                                            .font(.body)
-                                        Text("Saved \(saved.savedAt, format: .relative(presentation: .named))")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    Spacer()
-                                    Text("Mosh")
-                                        .font(.caption2)
-                                        .padding(.horizontal, 6)
-                                        .padding(.vertical, 2)
-                                        .background(.quaternary)
-                                        .clipShape(Capsule())
-                                }
-                            }
-                            .swipeActions(edge: .trailing) {
-                                Button(role: .destructive) {
-                                    dismissResumableSession(saved)
-                                } label: {
-                                    Label("Dismiss", systemImage: "xmark")
-                                }
-                            }
-                        }
-                    }
-                }
-
                 if !sessionManager.sessions.isEmpty {
                     Section("Active Sessions") {
                         ForEach(sessionManager.sessions) { session in
@@ -283,23 +246,6 @@ struct ConnectionListView: View {
             navigationPath.append(session.id)
         } catch {
             connectionError = String(describing: error)
-        }
-    }
-
-    private func resumeSession(_ saved: MoshSessionState) {
-        Task {
-            do {
-                let session = try await sessionManager.resume(saved)
-                navigationPath.append(session.id)
-            } catch {
-                connectionError = String(describing: error)
-            }
-        }
-    }
-
-    private func dismissResumableSession(_ saved: MoshSessionState) {
-        Task {
-            await sessionManager.dismissResumableSession(saved)
         }
     }
 

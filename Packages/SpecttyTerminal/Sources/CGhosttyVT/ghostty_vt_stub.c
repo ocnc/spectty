@@ -1,7 +1,6 @@
 // Stub implementations for libghostty-vt C API.
-// These will be replaced when the real library is linked.
-// For now they allow the Swift code to compile and provide
-// basic no-op behavior.
+// Replaced by the real library when linked.
+// No-op behavior that allows the Swift code to compile.
 
 #include "include/ghostty/ghostty_vt.h"
 #include <stdlib.h>

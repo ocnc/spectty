@@ -29,9 +29,9 @@ public struct KeyModifiers: OptionSet, Sendable {
     public static let `super` = KeyModifiers(rawValue: 1 << 3)
 }
 
-/// Protocol for terminal emulators. Designed to be swappable—
-/// today backed by our Swift state machine + libghostty-vt parsers,
-/// tomorrow potentially by a full libghostty C API.
+/// Protocol for terminal emulators. Designed to be swappable —
+/// backed by our Swift state machine + libghostty-vt parsers,
+/// or by a full libghostty C API.
 public protocol TerminalEmulator: AnyObject, Sendable {
     /// The current screen state (for rendering).
     var state: TerminalState { get }

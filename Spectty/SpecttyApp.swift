@@ -21,7 +21,7 @@ struct SpecttyApp: App {
             ContentRoot()
                 .environment(sessionManager)
                 .task {
-                    await sessionManager.loadResumableSessions()
+                    await sessionManager.autoResumeSessions()
                 }
         }
         .modelContainer(sharedModelContainer)

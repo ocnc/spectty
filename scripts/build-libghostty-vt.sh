@@ -23,13 +23,12 @@ echo "Building libghostty-vt for iOS arm64..."
 echo "Ghostty source: $GHOSTTY_SRC"
 echo "Output: $OUTPUT_DIR"
 
-# TODO: Implement actual cross-compilation
+# Uncomment when libghostty-vt provides a stable C API:
 # cd "$GHOSTTY_SRC"
 # zig build -Dtarget=aarch64-ios -Doptimize=ReleaseFast lib
 # cp zig-out/lib/libghostty-vt.a "$OUTPUT_DIR/"
 # cp -r include/ghostty "$OUTPUT_DIR/include/"
 
 echo ""
-echo "NOTE: This script is a placeholder. When libghostty-vt provides"
-echo "a stable C API for VT parsing, update this script to cross-compile it."
-echo "For now, the project uses stub implementations in CGhosttyVT."
+echo "NOTE: This script is a placeholder. The project uses stub"
+echo "implementations in CGhosttyVT until libghostty-vt is linked."

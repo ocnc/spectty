@@ -1,6 +1,6 @@
 // ghostty_vt.h — Stub header for libghostty-vt C API
-// This will be replaced with the real headers when libghostty-vt is compiled.
-// For now, we define the types and functions we expect to use.
+// Replaced by real headers when libghostty-vt is linked.
+// Defines the types and functions the Swift layer expects.
 
 #ifndef GHOSTTY_VT_H
 #define GHOSTTY_VT_H

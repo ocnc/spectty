@@ -27,7 +27,7 @@ An iOS SSH client built on [libghostty-vt](https://github.com/ghostty-org/ghostt
 │  VTStateMachine (CSI/SGR/OSC parser)                 │
 │  TerminalState (grid, cursor, modes, scrollback)     │
 │  KeyEncoder (xterm key sequences)                    │
-│  CGhosttyVT (C stubs for future libghostty-vt)      │
+│  CGhosttyVT (C stubs, swappable for libghostty-vt)  │
 └──────────────┬───────────────────────────────────────┘
                │ TerminalEmulator protocol
 ┌──────────────▼───────────────────────────────────────┐
@@ -70,7 +70,7 @@ Keyboard → KeyEncoder → Transport → Remote Server
 | Decision | Choice | Why |
 |----------|--------|-----|
 | Rendering | Metal from day 1 | Performance parity with Ghostty |
-| Terminal emulation | Custom Swift + libghostty-vt stubs | Replaceable via `TerminalEmulator` protocol as libghostty matures |
+| Terminal emulation | Custom Swift + libghostty-vt stubs | Replaceable via `TerminalEmulator` protocol |
 | SSH | SwiftNIO SSH | Pure Swift, Apple-maintained, Apache-2.0 |
 | Mosh | Clean-room Swift | No GPL dependency; AES-128-OCB3 via CommonCrypto, SSP + protobuf from scratch |
 | Persistence | SwiftData | Modern, built-in, iOS 17+ |
@@ -90,15 +90,14 @@ Clean-room Swift implementation — no GPL code. Key components:
 - **Session resumption**: Credentials + SSP sequence numbers persisted to Keychain; reconnect skips SSH bootstrap entirely since mosh-server is daemonized
 - **STUNClient**: Minimal RFC 5389 Binding Request for NAT type diagnostics
 
-## Migration Path
+## libghostty Integration
 
 The architecture is designed so libghostty components can be swapped in incrementally:
 
-1. **Now**: Our VT parser + our Metal renderer
-2. **When libghostty adds terminal state C API**: Replace `VTStateMachine` — `TerminalEmulator` protocol insulates everything else
-3. **When libghostty adds Metal rendering C API**: Replace `TerminalMetalRenderer` — `TerminalRenderer` protocol insulates everything else
+- **VT parsing**: Replace `VTStateMachine` with libghostty-vt's terminal state C API — `TerminalEmulator` protocol insulates everything else
+- **Rendering**: Replace `TerminalMetalRenderer` with libghostty's Metal rendering C API — `TerminalRenderer` protocol insulates everything else
 
-No big-bang migration needed. Each step is independent.
+Each swap is independent. No big-bang migration needed.
 
 ## Dependencies
 

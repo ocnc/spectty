@@ -11,9 +11,6 @@ final class SessionManager {
     private let keychain = KeychainManager()
     private let sessionStore = MoshSessionStore()
 
-    /// Mosh sessions available for resumption after app restart.
-    private(set) var resumableSessions: [MoshSessionState] = []
-
     /// Tracks which ServerConnection UUID each session belongs to.
     private var sessionConnectionIDs: [UUID: String] = [:]
 
@@ -92,17 +89,33 @@ final class SessionManager {
 
     // MARK: - Session Resumption
 
-    /// Load resumable mosh sessions from Keychain, filtering out stale ones.
+    /// Automatically resume all non-stale mosh sessions on app launch.
+    /// Sessions that fail to reconnect (server unreachable) are cleaned up silently.
     /// Server timeout is 600s; we filter at 550s to give a safety margin.
-    func loadResumableSessions() async {
+    func autoResumeSessions() async {
         let all = await sessionStore.loadAll()
         let cutoff = Date().addingTimeInterval(-550)
-        resumableSessions = all.filter { $0.savedAt > cutoff }
+        let fresh = all.filter { $0.savedAt > cutoff }
+        let stale = all.filter { $0.savedAt <= cutoff }
 
         // Clean up stale sessions
-        let stale = all.filter { $0.savedAt <= cutoff }
         for s in stale {
             await sessionStore.remove(sessionID: s.sessionID)
+        }
+
+        // Resume each fresh session concurrently
+        await withTaskGroup(of: Void.self) { group in
+            for saved in fresh {
+                group.addTask { @MainActor in
+                    do {
+                        _ = try await self.resume(saved)
+                    } catch {
+                        // Server unreachable or other failure — clean up silently.
+                        // Session was already removed from store in resume().
+                        print("[Mosh] Auto-resume failed for \(saved.connectionName): \(error)")
+                    }
+                }
+            }
         }
     }
 
@@ -135,8 +148,7 @@ final class SessionManager {
         sessionConnectionIDs[session.id] = savedState.connectionID
         activeSessionID = session.id
 
-        // Remove from resumable list
-        resumableSessions.removeAll { $0.sessionID == savedState.sessionID }
+        // Remove from store (session is now active, not persisted)
         await sessionStore.remove(sessionID: savedState.sessionID)
 
         do {
@@ -152,12 +164,6 @@ final class SessionManager {
         }
 
         return session
-    }
-
-    /// Dismiss a resumable session (user swiped to remove).
-    func dismissResumableSession(_ saved: MoshSessionState) async {
-        resumableSessions.removeAll { $0.sessionID == saved.sessionID }
-        await sessionStore.remove(sessionID: saved.sessionID)
     }
 
     /// Save all active mosh sessions for later resumption.

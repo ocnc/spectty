@@ -16,7 +16,7 @@ public struct TerminalFont: Sendable {
     }
 }
 
-/// Protocol for terminal renderers (allows swapping Metal impl for libghostty's renderer later).
+/// Protocol for terminal renderers (allows swapping Metal impl for libghostty's renderer).
 public protocol TerminalRenderer: AnyObject {
     func update(state: TerminalScreenState, scrollback: TerminalBuffer, scrollOffset: Int, viewportSize: CGSize)
     func setFont(_ font: TerminalFont)

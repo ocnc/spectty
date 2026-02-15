@@ -7,6 +7,7 @@ public enum MoshError: Error, LocalizedError {
     case connectionClosed
     case notConnected
     case serverUnreachable
+    case symmetricNAT
 
     public var errorDescription: String? {
         switch self {
@@ -20,6 +21,8 @@ public enum MoshError: Error, LocalizedError {
             return "Mosh transport is not connected"
         case .serverUnreachable:
             return "Mosh server is unreachable"
+        case .symmetricNAT:
+            return "Symmetric NAT detected — UDP connections may be unreliable. Consider using a VPN."
         }
     }
 }
@@ -45,6 +48,9 @@ public final class MoshTransport: ResumableTransport, @unchecked Sendable {
 
     /// Saved state for session resumption (set via `init(resuming:config:)`).
     nonisolated(unsafe) private var savedState: MoshSessionState?
+
+    /// NAT type detected during pre-flight STUN check. Available after `connect()`.
+    public nonisolated(unsafe) private(set) var detectedNATType: STUNClient.NATType?
 
     public init(config: SSHConnectionConfig) {
         self.config = config
@@ -91,7 +97,24 @@ public final class MoshTransport: ResumableTransport, @unchecked Sendable {
 
         stateContinuation.yield(.connecting)
 
-        // Phase 1: SSH bootstrap — exec mosh-server to get UDP port + key
+        // Pre-flight: detect NAT type. Symmetric NAT can cause UDP issues.
+        // Run concurrently with a short timeout — don't delay the connection.
+        let natType = await withTaskGroup(of: STUNClient.NATType.self) { group in
+            group.addTask { await STUNClient.detectNATType() }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(3))
+                return STUNClient.NATType.unknown
+            }
+            let result = await group.next() ?? .unknown
+            group.cancelAll()
+            return result
+        }
+        self.detectedNATType = natType
+        if natType == .symmetricNAT {
+            print("[Mosh] Warning: symmetric NAT detected — UDP may be unreliable")
+        }
+
+        // SSH bootstrap — exec mosh-server to get UDP port + key.
         // SSH is closed after bootstrap; mosh communicates entirely over UDP.
         let session: MoshSession
         do {
@@ -105,7 +128,7 @@ public final class MoshTransport: ResumableTransport, @unchecked Sendable {
         self.sessionKey = session.key
         self.sessionHost = session.host
 
-        // Phase 2: Set up crypto with the session key
+        // Set up crypto with the session key
         let crypto: MoshCryptoSession
         do {
             crypto = try MoshCryptoSession(base64Key: session.key)
@@ -114,7 +137,7 @@ public final class MoshTransport: ResumableTransport, @unchecked Sendable {
             throw error
         }
 
-        // Phase 3: UDP connection
+        // UDP connection
         let net = MoshNetwork(host: session.host, port: session.udpPort, crypto: crypto)
         self.network = net
 
@@ -125,10 +148,10 @@ public final class MoshTransport: ResumableTransport, @unchecked Sendable {
             throw error
         }
 
-        // Phase 4: Install roaming handlers
+        // Install roaming handlers
         installRoamingHandlers(on: net)
 
-        // Phase 5: Start SSP
+        // Start SSP
         let ssp = MoshSSP(network: net)
         self.ssp = ssp
 
