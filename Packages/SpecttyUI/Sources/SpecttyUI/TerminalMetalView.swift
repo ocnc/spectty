@@ -40,6 +40,9 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
     /// Debounce timer for resize — prevents sending intermediate sizes during keyboard animation.
     private var resizeDebounce: DispatchWorkItem?
 
+    /// Text selection overlay.
+    private let selectionView = TextSelectionView()
+
     /// Visual bell flash layer.
     private var bellLayer: CALayer?
 
@@ -70,12 +73,23 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
         self.isMultipleTouchEnabled = true
         self.isUserInteractionEnabled = true
 
+        // Selection overlay — hit tests only near drag handles, passes through otherwise.
+        selectionView.frame = bounds
+        addSubview(selectionView)
+
         // Tap to focus and show keyboard.
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
         addGestureRecognizer(tap)
     }
 
     @objc private func handleTap() {
+        // Clear any active selection on tap.
+        if selectionView.selection != nil {
+            selectionView.selection = nil
+            UIMenuController.shared.hideMenu()
+            return
+        }
+
         if isFirstResponder {
             resignFirstResponder()
         } else {
@@ -87,6 +101,16 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
         let handler = GestureHandler(metalView: self, emulator: emulator)
         handler.onMouseEvent = { [weak self] data in
             self?.onPaste?(data)
+        }
+        handler.onSelectionChanged = { [weak self] selection in
+            guard let self else { return }
+            self.selectionView.cellSize = self.cellSize
+            self.selectionView.selection = selection
+        }
+        // Handle-drag updates from the selection overlay.
+        selectionView.onSelectionChanged = { [weak self, weak handler] selection in
+            handler?.updateSelection(selection)
+            self?.selectionView.cellSize = self?.cellSize ?? .zero
         }
         self.gestureHandler = handler
     }
@@ -217,8 +241,42 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
     }
 
     @objc private func handleCopy() {
-        // TODO: Copy selected text when selection is implemented.
-        // For now this is a no-op to prevent the default Cmd+C behavior.
+        copyScreenText()
+    }
+
+    private func copyScreenText() {
+        guard let emulator = terminalEmulator else { return }
+
+        // If there's an active selection, copy only the selected text.
+        if selectionView.selection != nil,
+           let selectedText = selectionView.selectedText(from: emulator.state.activeScreen),
+           !selectedText.isEmpty {
+            UIPasteboard.general.string = selectedText
+            selectionView.selection = nil
+            return
+        }
+
+        // Fallback: copy entire visible screen.
+        let text = emulator.state.activeScreen.text()
+        guard !text.isEmpty else { return }
+        UIPasteboard.general.string = text
+    }
+
+    // MARK: - UIResponder Copy/Paste Menu
+
+    public override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        let hasSelection = selectionView.selection != nil
+        if action == #selector(copy(_:)) { return hasSelection }
+        if action == #selector(paste(_:)) { return hasSelection && UIPasteboard.general.hasStrings }
+        return super.canPerformAction(action, withSender: sender)
+    }
+
+    @objc public override func copy(_ sender: Any?) {
+        copyScreenText()
+    }
+
+    @objc public override func paste(_ sender: Any?) {
+        handlePaste()
     }
 
     // MARK: - Visual Bell
@@ -315,6 +373,7 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
             guard cols > 1, rows > 1 else { return }
             guard cols != self.lastReportedGridSize.columns || rows != self.lastReportedGridSize.rows else { return }
             self.lastReportedGridSize = (cols, rows)
+            self.scrollOffset = 0
             self.onResize?(cols, rows)
         }
         resizeDebounce = work
@@ -325,6 +384,7 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
 
     public override func layoutSubviews() {
         super.layoutSubviews()
+        selectionView.frame = bounds
         bellLayer?.frame = bounds
         notifyResizeIfNeeded()
     }

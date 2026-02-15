@@ -13,12 +13,18 @@ public final class GestureHandler: NSObject {
     /// Callback to send mouse events to the transport.
     public var onMouseEvent: ((Data) -> Void)?
 
+    /// Callback for text selection changes (nil = selection cleared).
+    public var onSelectionChanged: ((TerminalSelection?) -> Void)?
+
     private var panGesture: UIPanGestureRecognizer?
     private var pinchGesture: UIPinchGestureRecognizer?
     private var longPressGesture: UILongPressGestureRecognizer?
     private var twoFingerTapGesture: UITapGestureRecognizer?
 
     private var initialFontSize: CGFloat = 14
+    private var currentSelectionStart: (row: Int, col: Int)?
+    private var currentSelection: TerminalSelection?
+    private let selectionFeedback = UISelectionFeedbackGenerator()
 
     public init(metalView: TerminalMetalView, emulator: any TerminalEmulator) {
         self.metalView = metalView
@@ -113,15 +119,71 @@ public final class GestureHandler: NSObject {
     // MARK: - Long Press (Selection)
 
     @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
-        // TODO: Implement text selection with drag handles.
-        // Phase 2 feature — for now, just show the UIMenuController for copy.
         guard let metalView = metalView else { return }
 
-        if gesture.state == .began {
+        let point = gesture.location(in: metalView)
+        let cellSize = metalView.cellSize
+        let grid = metalView.gridSize
+        let col = max(0, min(Int(point.x / cellSize.width), grid.columns - 1))
+        let row = max(0, min(Int(point.y / cellSize.height), grid.rows - 1))
+
+        switch gesture.state {
+        case .began:
             metalView.becomeFirstResponder()
-            let menu = UIMenuController.shared
-            menu.showMenu(from: metalView, rect: CGRect(origin: gesture.location(in: metalView), size: .zero))
+            selectionFeedback.prepare()
+            selectionFeedback.selectionChanged()
+            currentSelectionStart = (row: row, col: col)
+            let sel = TerminalSelection(startRow: row, startCol: col, endRow: row, endCol: col)
+            currentSelection = sel
+            onSelectionChanged?(sel)
+
+        case .changed:
+            guard let start = currentSelectionStart else { return }
+            let sel = TerminalSelection(
+                startRow: start.row,
+                startCol: start.col,
+                endRow: row,
+                endCol: col
+            )
+            currentSelection = sel
+            onSelectionChanged?(sel)
+
+        case .ended:
+            currentSelectionStart = nil
+            // Show copy menu centered on the selection.
+            showSelectionMenu(on: metalView)
+
+        case .cancelled, .failed:
+            currentSelectionStart = nil
+            currentSelection = nil
+            onSelectionChanged?(nil)
+
+        default:
+            break
         }
+    }
+
+    /// Shows the UIMenuController centered on the current selection highlight.
+    private func showSelectionMenu(on view: UIView) {
+        guard let sel = currentSelection else { return }
+        guard let metalView = metalView else { return }
+        let cellSize = metalView.cellSize
+        let norm = sel.normalized
+
+        let midRow = (norm.startRow + norm.endRow) / 2
+        let menuRect = CGRect(
+            x: CGFloat(norm.startCol) * cellSize.width,
+            y: CGFloat(midRow) * cellSize.height,
+            width: CGFloat(norm.endCol - norm.startCol + 1) * cellSize.width,
+            height: cellSize.height
+        )
+        let menu = UIMenuController.shared
+        menu.showMenu(from: view, rect: menuRect)
+    }
+
+    /// Update the tracked selection (e.g. when handles are dragged externally).
+    public func updateSelection(_ selection: TerminalSelection?) {
+        currentSelection = selection
     }
 
     // MARK: - Two-Finger Tap (Paste)
