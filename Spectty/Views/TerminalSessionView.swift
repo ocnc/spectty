@@ -14,6 +14,7 @@ struct TerminalSessionView: View {
     @State private var showDisconnectConfirm = false
     @State private var showRenameAlert = false
     @State private var renameText = ""
+    @State private var isReconnecting = false
 
     var body: some View {
         ZStack {
@@ -118,26 +119,43 @@ struct TerminalSessionView: View {
                 showSpinner: true
             )
         case .failed(let error):
-            statusBanner(
-                icon: "exclamationmark.triangle",
-                text: error.localizedDescription,
-                showSpinner: false
-            )
+            if isReconnecting {
+                statusBanner(
+                    icon: "arrow.triangle.2.circlepath",
+                    text: "Reconnecting...",
+                    showSpinner: true
+                )
+            } else {
+                statusBanner(
+                    icon: "exclamationmark.triangle",
+                    text: error.localizedDescription,
+                    showSpinner: false,
+                    showReconnect: true
+                )
+            }
         case .disconnected:
             if !session.title.isEmpty {
-                // Only show if we were previously connected.
-                statusBanner(
-                    icon: "wifi.slash",
-                    text: "Disconnected",
-                    showSpinner: false
-                )
+                if isReconnecting {
+                    statusBanner(
+                        icon: "arrow.triangle.2.circlepath",
+                        text: "Reconnecting...",
+                        showSpinner: true
+                    )
+                } else {
+                    statusBanner(
+                        icon: "wifi.slash",
+                        text: "Disconnected",
+                        showSpinner: false,
+                        showReconnect: true
+                    )
+                }
             }
         case .connected:
             EmptyView()
         }
     }
 
-    private func statusBanner(icon: String, text: String, showSpinner: Bool) -> some View {
+    private func statusBanner(icon: String, text: String, showSpinner: Bool, showReconnect: Bool = false) -> some View {
         VStack(spacing: 12) {
             Spacer()
             HStack(spacing: 10) {
@@ -158,8 +176,29 @@ struct TerminalSessionView: View {
             .background(.ultraThinMaterial.opacity(0.9))
             .background(Color.black.opacity(0.5))
             .clipShape(Capsule())
-            .padding(.bottom, 80)
+
+            if showReconnect {
+                Button {
+                    isReconnecting = true
+                    Task {
+                        try? await session.reconnect()
+                        isReconnecting = false
+                    }
+                } label: {
+                    Text("Reconnect")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 10)
+                        .background(.ultraThinMaterial.opacity(0.9))
+                        .background(Color.blue.opacity(0.4))
+                        .clipShape(Capsule())
+                }
+            }
+
+            Spacer()
+                .frame(height: 60)
         }
-        .allowsHitTesting(false)
+        .allowsHitTesting(showReconnect)
     }
 }

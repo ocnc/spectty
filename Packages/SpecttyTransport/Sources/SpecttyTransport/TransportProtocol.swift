@@ -44,6 +44,15 @@ public protocol TerminalTransport: AnyObject, Sendable {
 
     /// Notify the remote host that the terminal has been resized.
     func resize(columns: Int, rows: Int) async throws
+
+    /// Check whether the connection is still alive.
+    /// If the connection is dead, the transport should yield `.disconnected` or `.failed`.
+    func checkConnection() async
+}
+
+extension TerminalTransport {
+    /// Default no-op for transports with their own liveness checks (e.g. Mosh).
+    public func checkConnection() async {}
 }
 
 /// Capability protocol for transports that support session persistence

@@ -26,6 +26,11 @@ struct SpecttyApp: App {
         }
         .modelContainer(sharedModelContainer)
         .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                Task { @MainActor in
+                    await sessionManager.checkAllConnections()
+                }
+            }
             if newPhase == .background {
                 Task { @MainActor in
                     await sessionManager.saveActiveSessions()

@@ -46,9 +46,19 @@ final class SessionManager {
         }
 
         let scrollbackLines = UserDefaults.standard.integer(forKey: "scrollbackLines")
+        let transportFactory: @Sendable () -> any TerminalTransport = {
+            switch connection.transport {
+            case .ssh:
+                return SSHTransport(config: config)
+            case .mosh:
+                return MoshTransport(config: config)
+            }
+        }
         let session = TerminalSession(
             connectionName: connection.name.isEmpty ? connection.host : connection.name,
             transport: transport,
+            transportFactory: transportFactory,
+            startupCommand: connection.startupCommand,
             scrollbackCapacity: scrollbackLines > 0 ? scrollbackLines : 10_000
         )
 
@@ -74,6 +84,13 @@ final class SessionManager {
         let sessionID = session.id.uuidString
         Task {
             await sessionStore.remove(sessionID: sessionID)
+        }
+    }
+
+    /// Probe all active sessions to detect dead connections.
+    func checkAllConnections() async {
+        for session in sessions {
+            await session.checkConnection()
         }
     }
 

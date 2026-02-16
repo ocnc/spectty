@@ -37,6 +37,9 @@ final class ServerConnection {
     /// Last connected date.
     var lastConnected: Date?
 
+    /// Command to run after connecting (e.g. "tmux new-session -A -s main").
+    var startupCommand: String?
+
     /// Sort order for the connection list.
     var sortOrder: Int
 

@@ -61,6 +61,8 @@ public final class SSHTransport: TerminalTransport, @unchecked Sendable {
     nonisolated(unsafe) private var parentChannel: Channel?
     nonisolated(unsafe) private var childChannel: Channel?
 
+    nonisolated(unsafe) private var keepaliveTask: Task<Void, Never>?
+
     // Track the last known terminal size for use in PTY allocation.
     nonisolated(unsafe) private var currentColumns: Int = 80
     nonisolated(unsafe) private var currentRows: Int = 24
@@ -93,6 +95,7 @@ public final class SSHTransport: TerminalTransport, @unchecked Sendable {
     }
 
     deinit {
+        keepaliveTask?.cancel()
         stateContinuation.finish()
         dataContinuation.finish()
         if ownsEventLoopGroup {
@@ -130,6 +133,7 @@ public final class SSHTransport: TerminalTransport, @unchecked Sendable {
                 }
             }
             .channelOption(ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR), value: 1)
+            .channelOption(ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_KEEPALIVE), value: 1)
             .channelOption(ChannelOptions.socket(SocketOptionLevel(IPPROTO_TCP), TCP_NODELAY), value: 1)
 
         // Establish TCP connection and SSH handshake.
@@ -157,18 +161,18 @@ public final class SSHTransport: TerminalTransport, @unchecked Sendable {
         }
 
         stateContinuation.yield(.connected)
+        startKeepalive()
 
         // Monitor the parent channel's close future so we can update state.
         channel.closeFuture.whenComplete { [weak self] _ in
-            guard let self else { return }
-            self.parentChannel = nil
-            self.childChannel = nil
-            self.stateContinuation.yield(.disconnected)
-            self.dataContinuation.finish()
+            self?.handleConnectionDeath()
         }
     }
 
     public func disconnect() async throws {
+        keepaliveTask?.cancel()
+        keepaliveTask = nil
+
         guard let parent = parentChannel else {
             return // Already disconnected; no-op.
         }
@@ -219,7 +223,42 @@ public final class SSHTransport: TerminalTransport, @unchecked Sendable {
         try await promise.futureResult.get()
     }
 
+    public func checkConnection() async {
+        guard let child = childChannel else { return }
+        do {
+            let buf = child.allocator.buffer(capacity: 0)
+            try await child.writeAndFlush(buf)
+        } catch {
+            handleConnectionDeath()
+        }
+    }
+
     // MARK: - Private
+
+    private func handleConnectionDeath() {
+        keepaliveTask?.cancel()
+        keepaliveTask = nil
+        parentChannel = nil
+        childChannel = nil
+        stateContinuation.yield(.disconnected)
+        dataContinuation.finish()
+    }
+
+    private func startKeepalive() {
+        keepaliveTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(15))
+                guard !Task.isCancelled, let self, let child = self.childChannel else { break }
+                do {
+                    let buf = child.allocator.buffer(capacity: 0)
+                    try await child.writeAndFlush(buf)
+                } catch {
+                    self.handleConnectionDeath()
+                    break
+                }
+            }
+        }
+    }
 
     private func makeAuthDelegate() -> NIOSSHClientUserAuthenticationDelegate {
         switch config.authMethod {

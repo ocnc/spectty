@@ -52,6 +52,17 @@ struct ConnectionEditorView: View {
                     }
                     .pickerStyle(.segmented)
                 }
+
+                Section {
+                    TextField("e.g. tmux new-session -A -s main", text: startupCommandBinding)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .font(.system(.body, design: .monospaced))
+                } header: {
+                    Text("Startup Command")
+                } footer: {
+                    Text("Runs automatically after connecting. Useful for attaching to tmux or screen sessions.")
+                }
             }
             .navigationTitle(isNew ? "New Connection" : "Edit Connection")
             .navigationBarTitleDisplayMode(.inline)
@@ -73,6 +84,13 @@ struct ConnectionEditorView: View {
                 }
             }
         }
+    }
+
+    private var startupCommandBinding: Binding<String> {
+        Binding(
+            get: { connection.startupCommand ?? "" },
+            set: { connection.startupCommand = $0.isEmpty ? nil : $0 }
+        )
     }
 
     private func savePasswordToKeychain() async {
