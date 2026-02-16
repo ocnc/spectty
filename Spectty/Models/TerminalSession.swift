@@ -51,9 +51,10 @@ final class TerminalSession: Identifiable {
         try? await transport.resize(columns: cols, rows: rows)
 
         // Listen for transport state changes.
+        let stateStream = transport.state
         stateTask = Task { [weak self] in
-            guard let self else { return }
-            for await state in self.transport.state {
+            for await state in stateStream {
+                guard let self else { break }
                 if case .disconnected = state, self.transportFactory != nil {
                     self.attemptAutoReconnect()
                 } else {
@@ -63,9 +64,10 @@ final class TerminalSession: Identifiable {
         }
 
         // Listen for incoming data and feed to emulator.
+        let dataStream = transport.incomingData
         receiveTask = Task { [weak self] in
-            guard let self else { return }
-            for await data in self.transport.incomingData {
+            for await data in dataStream {
+                guard let self else { break }
                 self.emulator.feed(data)
                 // Update title from terminal state.
                 let newTitle = self.emulator.state.activeScreen.title
@@ -142,9 +144,10 @@ final class TerminalSession: Identifiable {
         let rows = emulator.state.rows
         try? await newTransport.resize(columns: cols, rows: rows)
 
+        let newStateStream = newTransport.state
         stateTask = Task { [weak self] in
-            guard let self else { return }
-            for await state in newTransport.state {
+            for await state in newStateStream {
+                guard let self else { break }
                 if case .disconnected = state, self.transportFactory != nil {
                     self.attemptAutoReconnect()
                 } else {
@@ -153,9 +156,10 @@ final class TerminalSession: Identifiable {
             }
         }
 
+        let newDataStream = newTransport.incomingData
         receiveTask = Task { [weak self] in
-            guard let self else { return }
-            for await data in newTransport.incomingData {
+            for await data in newDataStream {
+                guard let self else { break }
                 self.emulator.feed(data)
                 let newTitle = self.emulator.state.activeScreen.title
                 if !newTitle.isEmpty && newTitle != self.title {
@@ -176,9 +180,8 @@ final class TerminalSession: Identifiable {
         guard autoReconnectTask == nil else { return }
         transportState = .reconnecting
         autoReconnectTask = Task { [weak self] in
-            guard let self else { return }
             try? await Task.sleep(for: .milliseconds(500))
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, let self else { return }
             do {
                 try await self.reconnect()
             } catch {

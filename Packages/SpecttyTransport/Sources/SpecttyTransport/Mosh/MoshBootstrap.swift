@@ -350,9 +350,20 @@ private final class ExecOutputCollector: ChannelDuplexHandler {
         if delivered {
             return String(data: buffer, encoding: .utf8) ?? ""
         }
-        return try await withCheckedThrowingContinuation { cont in
-            self.continuation = cont
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { cont in
+                self.continuation = cont
+            }
+        } onCancel: {
+            self.cancelContinuation()
         }
+    }
+
+    private func cancelContinuation() {
+        guard !delivered else { return }
+        delivered = true
+        continuation?.resume(throwing: CancellationError())
+        continuation = nil
     }
 }
 
