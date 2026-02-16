@@ -111,7 +111,7 @@ public final class MoshTransport: ResumableTransport, @unchecked Sendable {
         }
         self.detectedNATType = natType
         if natType == .symmetricNAT {
-            print("[Mosh] Warning: symmetric NAT detected — UDP may be unreliable")
+            // Symmetric NAT detected — UDP may be unreliable
         }
 
         // SSH bootstrap — exec mosh-server to get UDP port + key.
@@ -120,7 +120,6 @@ public final class MoshTransport: ResumableTransport, @unchecked Sendable {
         do {
             session = try await MoshBootstrap.start(config: config)
         } catch {
-            print("[Mosh] Bootstrap failed: \(error)")
             stateContinuation.yield(.failed(error))
             throw error
         }

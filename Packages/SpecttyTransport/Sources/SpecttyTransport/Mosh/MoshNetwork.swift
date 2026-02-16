@@ -76,11 +76,7 @@ final class MoshNetwork: @unchecked Sendable {
             payload: payload
         )
         let datagram = crypto.seal(packet: packet)
-        connection.send(content: datagram, completion: .contentProcessed { error in
-            if let error {
-                print("[Mosh] UDP send error: \(error)")
-            }
-        })
+        connection.send(content: datagram, completion: .contentProcessed { _ in })
     }
 
     /// Stop the connection.

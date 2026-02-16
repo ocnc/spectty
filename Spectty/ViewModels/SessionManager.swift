@@ -129,7 +129,6 @@ final class SessionManager {
                     } catch {
                         // Server unreachable or other failure — clean up silently.
                         // Session was already removed from store in resume().
-                        print("[Mosh] Auto-resume failed for \(saved.connectionName): \(error)")
                     }
                 }
             }

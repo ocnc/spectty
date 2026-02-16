@@ -436,7 +436,6 @@ final class MoshFragmenter: @unchecked Sendable {
         // Serialize protobuf and compress with zlib
         let protobuf = instruction.serialize()
         guard let compressed = zlibCompress(protobuf) else {
-            print("[Mosh] Fragment: zlib compression failed")
             return []
         }
 
@@ -497,7 +496,6 @@ final class MoshFragmentAssembly: @unchecked Sendable {
 
         // Decompress
         guard let decompressed = zlibDecompress(assembled) else {
-            print("[Mosh] Fragment: zlib decompression failed for \(assembled.count) bytes")
             return nil
         }
 

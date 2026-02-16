@@ -257,7 +257,6 @@ enum MoshBootstrap {
                 parentChannel.close(promise: nil)
             } catch {
                 // Best-effort: MOSH_SERVER_NETWORK_TMOUT will clean up eventually
-                print("[Mosh] Could not kill remote mosh-server: \(error)")
             }
         }
     }
