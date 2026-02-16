@@ -42,8 +42,10 @@ struct SettingsView: View {
             Section("Theme") {
                 Picker("Color Scheme", selection: $colorScheme) {
                     Text("Default").tag("Default")
-                    Text("Solarized Dark").tag("Solarized Dark")
-                    Text("Solarized Light").tag("Solarized Light")
+                    Text("Catppuccin Mocha").tag("Catppuccin Mocha")
+                    Text("Catppuccin Latte").tag("Catppuccin Latte")
+                    Text("Tokyo Night").tag("Tokyo Night")
+                    Text("Gruvbox Dark").tag("Gruvbox Dark")
                     Text("Dracula").tag("Dracula")
                     Text("Nord").tag("Nord")
                     Text("Monokai").tag("Monokai")

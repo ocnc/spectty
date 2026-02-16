@@ -30,12 +30,14 @@ public struct TerminalTheme: Sendable {
     /// Look up a theme by name (matches the SettingsView picker values).
     public static func named(_ name: String) -> TerminalTheme {
         switch name {
-        case "Solarized Dark":  return .solarizedDark
-        case "Solarized Light": return .solarizedLight
-        case "Dracula":         return .dracula
-        case "Nord":            return .nord
-        case "Monokai":         return .monokai
-        default:                return .default
+        case "Catppuccin Mocha": return .catppuccinMocha
+        case "Catppuccin Latte": return .catppuccinLatte
+        case "Tokyo Night":      return .tokyoNight
+        case "Gruvbox Dark":     return .gruvboxDark
+        case "Dracula":          return .dracula
+        case "Nord":             return .nord
+        case "Monokai":          return .monokai
+        default:                 return .default
         }
     }
 
@@ -65,51 +67,99 @@ public struct TerminalTheme: Sendable {
         ]
     )
 
-    public static let solarizedDark = TerminalTheme(
-        foreground: (131, 148, 150),
-        background: (0, 43, 54),
-        cursor: (131, 148, 150),
+    public static let catppuccinMocha = TerminalTheme(
+        foreground: (205, 214, 244),
+        background: (30, 30, 46),
+        cursor: (245, 224, 220),
         ansiColors: [
-            (7, 54, 66),       // 0  Black
-            (220, 50, 47),     // 1  Red
-            (133, 153, 0),     // 2  Green
-            (181, 137, 0),     // 3  Yellow
-            (38, 139, 210),    // 4  Blue
-            (211, 54, 130),    // 5  Magenta
-            (42, 161, 152),    // 6  Cyan
-            (238, 232, 213),   // 7  White
-            (0, 43, 54),       // 8  Bright Black
-            (203, 75, 22),     // 9  Bright Red
-            (88, 110, 117),    // 10 Bright Green
-            (101, 123, 131),   // 11 Bright Yellow
-            (131, 148, 150),   // 12 Bright Blue
-            (108, 113, 196),   // 13 Bright Magenta
-            (147, 161, 161),   // 14 Bright Cyan
-            (253, 246, 227),   // 15 Bright White
+            (69, 71, 90),      // 0  Black
+            (243, 139, 168),   // 1  Red
+            (166, 227, 161),   // 2  Green
+            (249, 226, 175),   // 3  Yellow
+            (137, 180, 250),   // 4  Blue
+            (245, 194, 231),   // 5  Magenta
+            (148, 226, 213),   // 6  Cyan
+            (166, 173, 200),   // 7  White
+            (88, 91, 112),     // 8  Bright Black
+            (243, 119, 153),   // 9  Bright Red
+            (137, 216, 139),   // 10 Bright Green
+            (235, 211, 145),   // 11 Bright Yellow
+            (116, 168, 252),   // 12 Bright Blue
+            (242, 174, 222),   // 13 Bright Magenta
+            (107, 215, 202),   // 14 Bright Cyan
+            (186, 194, 222),   // 15 Bright White
         ]
     )
 
-    public static let solarizedLight = TerminalTheme(
-        foreground: (101, 123, 131),
-        background: (253, 246, 227),
-        cursor: (101, 123, 131),
+    public static let catppuccinLatte = TerminalTheme(
+        foreground: (76, 79, 105),
+        background: (239, 241, 245),
+        cursor: (220, 138, 120),
         ansiColors: [
-            (7, 54, 66),       // 0  Black
-            (220, 50, 47),     // 1  Red
-            (133, 153, 0),     // 2  Green
-            (181, 137, 0),     // 3  Yellow
-            (38, 139, 210),    // 4  Blue
-            (211, 54, 130),    // 5  Magenta
-            (42, 161, 152),    // 6  Cyan
-            (238, 232, 213),   // 7  White
-            (0, 43, 54),       // 8  Bright Black
-            (203, 75, 22),     // 9  Bright Red
-            (88, 110, 117),    // 10 Bright Green
-            (101, 123, 131),   // 11 Bright Yellow
-            (131, 148, 150),   // 12 Bright Blue
-            (108, 113, 196),   // 13 Bright Magenta
-            (147, 161, 161),   // 14 Bright Cyan
-            (253, 246, 227),   // 15 Bright White
+            (92, 95, 119),     // 0  Black
+            (210, 15, 57),     // 1  Red
+            (64, 160, 43),     // 2  Green
+            (223, 142, 29),    // 3  Yellow
+            (30, 102, 245),    // 4  Blue
+            (234, 118, 203),   // 5  Magenta
+            (23, 146, 153),    // 6  Cyan
+            (172, 176, 190),   // 7  White
+            (108, 111, 133),   // 8  Bright Black
+            (222, 41, 62),     // 9  Bright Red
+            (73, 175, 61),     // 10 Bright Green
+            (238, 160, 45),    // 11 Bright Yellow
+            (69, 110, 255),    // 12 Bright Blue
+            (254, 133, 216),   // 13 Bright Magenta
+            (45, 159, 168),    // 14 Bright Cyan
+            (188, 192, 204),   // 15 Bright White
+        ]
+    )
+
+    public static let tokyoNight = TerminalTheme(
+        foreground: (192, 202, 245),
+        background: (26, 27, 38),
+        cursor: (192, 202, 245),
+        ansiColors: [
+            (21, 22, 30),      // 0  Black
+            (247, 118, 142),   // 1  Red
+            (158, 206, 106),   // 2  Green
+            (224, 175, 104),   // 3  Yellow
+            (122, 162, 247),   // 4  Blue
+            (187, 154, 247),   // 5  Magenta
+            (125, 207, 255),   // 6  Cyan
+            (169, 177, 214),   // 7  White
+            (65, 72, 104),     // 8  Bright Black
+            (255, 137, 157),   // 9  Bright Red
+            (159, 224, 68),    // 10 Bright Green
+            (250, 186, 74),    // 11 Bright Yellow
+            (141, 176, 255),   // 12 Bright Blue
+            (199, 169, 255),   // 13 Bright Magenta
+            (164, 218, 255),   // 14 Bright Cyan
+            (192, 202, 245),   // 15 Bright White
+        ]
+    )
+
+    public static let gruvboxDark = TerminalTheme(
+        foreground: (235, 219, 178),
+        background: (40, 40, 40),
+        cursor: (235, 219, 178),
+        ansiColors: [
+            (40, 40, 40),      // 0  Black
+            (204, 36, 29),     // 1  Red
+            (152, 151, 26),    // 2  Green
+            (215, 153, 33),    // 3  Yellow
+            (69, 133, 136),    // 4  Blue
+            (177, 98, 134),    // 5  Magenta
+            (104, 157, 106),   // 6  Cyan
+            (168, 153, 132),   // 7  White
+            (146, 131, 116),   // 8  Bright Black
+            (251, 73, 52),     // 9  Bright Red
+            (184, 187, 38),    // 10 Bright Green
+            (250, 189, 47),    // 11 Bright Yellow
+            (131, 165, 152),   // 12 Bright Blue
+            (211, 134, 155),   // 13 Bright Magenta
+            (142, 192, 124),   // 14 Bright Cyan
+            (235, 219, 178),   // 15 Bright White
         ]
     )
 
