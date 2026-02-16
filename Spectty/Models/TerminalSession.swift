@@ -20,6 +20,8 @@ final class TerminalSession: Identifiable {
     nonisolated(unsafe) private var receiveTask: Task<Void, Never>?
     @ObservationIgnored
     nonisolated(unsafe) private var stateTask: Task<Void, Never>?
+    @ObservationIgnored
+    nonisolated(unsafe) private var autoReconnectTask: Task<Void, Never>?
 
     init(id: UUID = UUID(), connectionName: String, transport: any TerminalTransport, transportFactory: (@Sendable () -> any TerminalTransport)? = nil, startupCommand: String? = nil, columns: Int = 80, rows: Int = 24, scrollbackCapacity: Int = 10_000) {
         self.id = id
@@ -52,7 +54,11 @@ final class TerminalSession: Identifiable {
         stateTask = Task { [weak self] in
             guard let self else { return }
             for await state in self.transport.state {
-                self.transportState = state
+                if case .disconnected = state, self.transportFactory != nil {
+                    self.attemptAutoReconnect()
+                } else {
+                    self.transportState = state
+                }
             }
         }
 
@@ -98,6 +104,8 @@ final class TerminalSession: Identifiable {
 
     /// Disconnect and clean up.
     func stop() {
+        autoReconnectTask?.cancel()
+        autoReconnectTask = nil
         receiveTask?.cancel()
         stateTask?.cancel()
         Task {
@@ -137,7 +145,11 @@ final class TerminalSession: Identifiable {
         stateTask = Task { [weak self] in
             guard let self else { return }
             for await state in newTransport.state {
-                self.transportState = state
+                if case .disconnected = state, self.transportFactory != nil {
+                    self.attemptAutoReconnect()
+                } else {
+                    self.transportState = state
+                }
             }
         }
 
@@ -155,6 +167,27 @@ final class TerminalSession: Identifiable {
         sendStartupCommand()
     }
 
+    /// Manually retry connection after auto-reconnect has failed.
+    func retryConnection() {
+        attemptAutoReconnect()
+    }
+
+    private func attemptAutoReconnect() {
+        guard autoReconnectTask == nil else { return }
+        transportState = .reconnecting
+        autoReconnectTask = Task { [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            do {
+                try await self.reconnect()
+            } catch {
+                self.transportState = .failed(error)
+            }
+            self.autoReconnectTask = nil
+        }
+    }
+
     private func sendStartupCommand() {
         guard let cmd = startupCommand, !cmd.isEmpty else { return }
         let transport = self.transport
@@ -164,6 +197,7 @@ final class TerminalSession: Identifiable {
     }
 
     deinit {
+        autoReconnectTask?.cancel()
         receiveTask?.cancel()
         stateTask?.cancel()
     }

@@ -14,7 +14,6 @@ struct TerminalSessionView: View {
     @State private var showDisconnectConfirm = false
     @State private var showRenameAlert = false
     @State private var renameText = ""
-    @State private var isReconnecting = false
 
     var body: some View {
         ZStack {
@@ -119,36 +118,19 @@ struct TerminalSessionView: View {
                 showSpinner: true
             )
         case .failed(let error):
-            if isReconnecting {
-                statusBanner(
-                    icon: "arrow.triangle.2.circlepath",
-                    text: "Reconnecting...",
-                    showSpinner: true
-                )
-            } else {
-                statusBanner(
-                    icon: "exclamationmark.triangle",
-                    text: error.localizedDescription,
-                    showSpinner: false,
-                    showReconnect: true
-                )
-            }
+            statusBanner(
+                icon: "exclamationmark.triangle",
+                text: error.localizedDescription,
+                showSpinner: false,
+                showReconnect: true
+            )
         case .disconnected:
             if !session.title.isEmpty {
-                if isReconnecting {
-                    statusBanner(
-                        icon: "arrow.triangle.2.circlepath",
-                        text: "Reconnecting...",
-                        showSpinner: true
-                    )
-                } else {
-                    statusBanner(
-                        icon: "wifi.slash",
-                        text: "Disconnected",
-                        showSpinner: false,
-                        showReconnect: true
-                    )
-                }
+                statusBanner(
+                    icon: "wifi.slash",
+                    text: "Disconnected",
+                    showSpinner: false
+                )
             }
         case .connected:
             EmptyView()
@@ -179,11 +161,7 @@ struct TerminalSessionView: View {
 
             if showReconnect {
                 Button {
-                    isReconnecting = true
-                    Task {
-                        try? await session.reconnect()
-                        isReconnecting = false
-                    }
+                    session.retryConnection()
                 } label: {
                     Text("Reconnect")
                         .font(.subheadline.weight(.semibold))
