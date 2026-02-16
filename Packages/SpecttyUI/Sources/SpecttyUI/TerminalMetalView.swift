@@ -314,10 +314,8 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
     // MARK: - UIResponder Copy/Paste Menu
 
     public override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
-        let hasSelection = selectionView.selection != nil
-        if action == #selector(copy(_:)) { return hasSelection }
-        if action == #selector(paste(_:)) { return hasSelection && UIPasteboard.general.hasStrings }
-        return super.canPerformAction(action, withSender: sender)
+        if action == #selector(copy(_:)) { return selectionView.selection != nil }
+        return false
     }
 
     @objc public override func copy(_ sender: Any?) {
