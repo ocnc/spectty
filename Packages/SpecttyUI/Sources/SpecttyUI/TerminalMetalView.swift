@@ -89,6 +89,29 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
         // Tap to focus and show keyboard.
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
         addGestureRecognizer(tap)
+
+        // Pause Metal rendering while backgrounded — drawables are unavailable
+        // and attempting to render produces blank frames.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(appDidEnterBackground),
+            name: UIApplication.didEnterBackgroundNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(appWillEnterForeground),
+            name: UIApplication.willEnterForegroundNotification,
+            object: nil
+        )
+    }
+
+    @objc private func appDidEnterBackground() {
+        isPaused = true
+    }
+
+    @objc private func appWillEnterForeground() {
+        isPaused = false
     }
 
     @objc private func handleTap() {

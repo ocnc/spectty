@@ -2,6 +2,9 @@ import SwiftUI
 import SpecttyTerminal
 
 /// SwiftUI wrapper for the Metal terminal view.
+///
+/// Uses a Coordinator to hold callback closures so the underlying
+/// TerminalMetalView's references stay stable across SwiftUI re-renders.
 public struct TerminalView: UIViewRepresentable {
     private let emulator: any TerminalEmulator
     private let onKeyInput: ((KeyEvent) -> Void)?
@@ -29,11 +32,26 @@ public struct TerminalView: UIViewRepresentable {
         self.onResize = onResize
     }
 
+    public func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
     public func makeUIView(context: Context) -> TerminalMetalView {
+        let coordinator = context.coordinator
+        coordinator.onKeyInput = onKeyInput
+        coordinator.onPaste = onPaste
+        coordinator.onResize = onResize
+
         let metalView = TerminalMetalView(frame: .zero, emulator: emulator)
-        metalView.onKeyInput = onKeyInput
-        metalView.onPaste = onPaste
-        metalView.onResize = onResize
+        metalView.onKeyInput = { [weak coordinator] event in
+            coordinator?.onKeyInput?(event)
+        }
+        metalView.onPaste = { [weak coordinator] data in
+            coordinator?.onPaste?(data)
+        }
+        metalView.onResize = { [weak coordinator] cols, rows in
+            coordinator?.onResize?(cols, rows)
+        }
         metalView.setFont(font)
         metalView.setTheme(TerminalTheme.named(themeName))
         metalView.setCursorStyle(cursorStyle)
@@ -47,11 +65,18 @@ public struct TerminalView: UIViewRepresentable {
     }
 
     public func updateUIView(_ uiView: TerminalMetalView, context: Context) {
-        uiView.onKeyInput = onKeyInput
-        uiView.onPaste = onPaste
-        uiView.onResize = onResize
+        let coordinator = context.coordinator
+        coordinator.onKeyInput = onKeyInput
+        coordinator.onPaste = onPaste
+        coordinator.onResize = onResize
         uiView.setFont(font)
         uiView.setTheme(TerminalTheme.named(themeName))
         uiView.setCursorStyle(cursorStyle)
+    }
+
+    public final class Coordinator {
+        var onKeyInput: ((KeyEvent) -> Void)?
+        var onPaste: ((Data) -> Void)?
+        var onResize: ((Int, Int) -> Void)?
     }
 }

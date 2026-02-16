@@ -154,6 +154,12 @@ struct ConnectionListView: View {
             .navigationDestination(for: UUID.self) { sessionID in
                 if let session = sessionManager.sessions.first(where: { $0.id == sessionID }) {
                     TerminalSessionView(session: session)
+                } else {
+                    ContentUnavailableView(
+                        "Session Ended",
+                        systemImage: "terminal",
+                        description: Text("This session is no longer active.")
+                    )
                 }
             }
             .alert("Connection Failed", isPresented: .init(
