@@ -5,7 +5,7 @@
 <h1 align="center">Spectty</h1>
 
 <p align="center">
-  An iOS SSH client built on <a href="https://github.com/ghostty-org/ghostty">libghostty-vt</a> with a custom Metal renderer and clean-room Mosh implementation.
+  A fast, native SSH & Mosh terminal for iOS — Metal-rendered, inspired by <a href="https://github.com/ghostty-org/ghostty">Ghostty</a>, with a clean-room Mosh implementation.
 </p>
 
 <p align="center">
@@ -14,6 +14,16 @@
   <img src="https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white" alt="Swift 6">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
 </p>
+
+## Features
+
+- **SSH & Mosh** — connect over SSH or Mosh with automatic reconnection and network roaming
+- **Metal renderer** — GPU-accelerated terminal rendering with CoreText glyph atlas
+- **Session persistence** — Mosh sessions survive app backgrounding and network switches
+- **8 themes** — Default, Catppuccin Mocha, Catppuccin Latte, Tokyo Night, Gruvbox Dark, Dracula, Nord, Monokai
+- **Secure** — passwords and keys stored in the iOS Keychain; Secure Enclave support for key generation
+- **No tracking** — no accounts, no analytics, no data collection
+- **Swift 6** — strict concurrency with async/await throughout
 
 ## Architecture
 
@@ -73,20 +83,6 @@ Keyboard → KeyEncoder → Transport → Remote Server
 | `SpecttyTransport` | SSH (SwiftNIO SSH) and Mosh transports behind `TerminalTransport` protocol |
 | `SpecttyUI` | Metal renderer with CoreText glyph atlas, SwiftUI wrapper, input accessory bar, gestures |
 | `SpecttyKeychain` | iOS Keychain key storage, Ed25519/ECDSA/Secure Enclave generation, OpenSSH PEM import |
-
-## Key Design Decisions
-
-| Decision | Choice | Why |
-|----------|--------|-----|
-| Rendering | Metal from day 1 | Performance parity with Ghostty |
-| Terminal emulation | Custom Swift + libghostty-vt stubs | Replaceable via `TerminalEmulator` protocol |
-| SSH | SwiftNIO SSH | Pure Swift, Apple-maintained, Apache-2.0 |
-| Mosh | Clean-room Swift | No GPL dependency; AES-128-OCB3 via CommonCrypto, SSP + protobuf from scratch |
-| Persistence | SwiftData | Modern, built-in, iOS 17+ |
-| Concurrency | Swift 6 strict | async/await, AsyncStream, actors throughout |
-| Key storage | iOS Keychain + Secure Enclave | Hardware-backed, platform standard |
-| Session resumption | `ResumableTransport` protocol | Capability-based; app layer doesn't downcast to concrete transport types |
-| Network roaming | NWConnection path handlers | Platform-native; viability + better-path triggers UDP connection replacement |
 
 ## Mosh Implementation
 
