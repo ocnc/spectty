@@ -27,6 +27,9 @@ Packages/*/.build/
 Vendor/libghostty-vt/*.a
 Vendor/libghostty-vt/*.dylib
 
+# Test fixtures
+docker-mosh-test/
+
 # Misc
 *.log
 *.tmp

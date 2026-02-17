@@ -24,7 +24,7 @@ public actor KeychainManager {
     // MARK: Constants
 
     /// The service name used to scope all items stored by this manager.
-    private static let serviceName = "sh.ligma.Spectty.ssh-keys"
+    private static let serviceName = "com.oceancheung.spectty-terminal.ssh-keys"
 
     // MARK: Initialisation
 
