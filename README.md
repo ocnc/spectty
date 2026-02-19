@@ -9,6 +9,7 @@
 </p>
 
 <p align="center">
+  <a href="https://apps.apple.com/app/spectty/id6759269910"><img src="https://img.shields.io/badge/App_Store-0D96F6?logo=app-store&logoColor=white" alt="App Store"></a>
   <a href="https://github.com/ocnc/spectty/actions/workflows/build.yml"><img src="https://github.com/ocnc/spectty/actions/workflows/build.yml/badge.svg" alt="Build"></a>
   <img src="https://img.shields.io/badge/platform-iOS_18%2B-blue?logo=apple" alt="Platform">
   <img src="https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white" alt="Swift 6">
