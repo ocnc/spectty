@@ -13,6 +13,11 @@ public struct KeyEncoder: Sendable {
 
         let applicationCursor = modes.contains(.applicationCursor)
 
+        // Shift+Tab → backtab (CSI Z).
+        if event.keyCode == Self.keyTab && event.modifiers.contains(.shift) {
+            return Data("\u{1B}[Z".utf8)
+        }
+
         // If the key has printable characters and no special modifiers beyond shift,
         // just send the characters.
         if !event.characters.isEmpty && event.modifiers.subtracting(.shift).isEmpty {
