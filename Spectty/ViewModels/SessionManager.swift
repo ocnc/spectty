@@ -1,4 +1,6 @@
 import Foundation
+import CryptoKit
+import NIOSSH
 import SpecttyTransport
 import SpecttyKeychain
 
@@ -20,20 +22,35 @@ final class SessionManager {
 
     /// Create and start a new session for a server connection.
     func connect(to connection: ServerConnection) async throws -> TerminalSession {
-        // Resolve password: use transient value if set, otherwise load from Keychain.
-        var password = connection.password
-        if password.isEmpty, connection.authMethod == .password {
-            let account = "password-\(connection.id.uuidString)"
-            if let data = try? await keychain.load(account: account) {
-                password = String(data: data, encoding: .utf8) ?? ""
+        let authMethod: SSHAuthMethod
+
+        switch connection.authMethod {
+        case .publicKey:
+            let account = "private-key-\(connection.id.uuidString)"
+            guard let pemData = try? await keychain.load(account: account),
+                  let pemString = String(data: pemData, encoding: .utf8) else {
+                throw SSHTransportError.authenticationFailed
             }
+            let parsedKey = try SSHKeyImporter.importKey(from: pemString)
+            let nioKey = try Self.makeNIOSSHPrivateKey(from: parsedKey)
+            authMethod = .publicKey(nioKey)
+
+        case .password, .keyboardInteractive:
+            var password = connection.password
+            if password.isEmpty {
+                let account = "password-\(connection.id.uuidString)"
+                if let data = try? await keychain.load(account: account) {
+                    password = String(data: data, encoding: .utf8) ?? ""
+                }
+            }
+            authMethod = .password(password)
         }
 
         let config = SSHConnectionConfig(
             host: connection.host,
             port: connection.port,
             username: connection.username,
-            authMethod: .password(password)
+            authMethod: authMethod
         )
 
         let transport: any TerminalTransport
@@ -45,9 +62,10 @@ final class SessionManager {
             transport = MoshTransport(config: config)
         }
 
+        let transportType = connection.transport
         let scrollbackLines = UserDefaults.standard.integer(forKey: "scrollbackLines")
         let transportFactory: @Sendable () -> any TerminalTransport = {
-            switch connection.transport {
+            switch transportType {
             case .ssh:
                 return SSHTransport(config: config)
             case .mosh:
@@ -137,18 +155,33 @@ final class SessionManager {
 
     /// Resume a saved mosh session.
     func resume(_ savedState: MoshSessionState) async throws -> TerminalSession {
-        // Look up SSH password from Keychain by connectionID
-        var password = ""
-        let account = "password-\(savedState.connectionID)"
-        if let data = try? await keychain.load(account: account) {
-            password = String(data: data, encoding: .utf8) ?? ""
+        let authMethod: SSHAuthMethod
+
+        if savedState.authMethodType == "publicKey" {
+            let account = "private-key-\(savedState.connectionID)"
+            if let pemData = try? await keychain.load(account: account),
+               let pemString = String(data: pemData, encoding: .utf8),
+               let parsedKey = try? SSHKeyImporter.importKey(from: pemString),
+               let nioKey = try? Self.makeNIOSSHPrivateKey(from: parsedKey) {
+                authMethod = .publicKey(nioKey)
+            } else {
+                // Key missing from Keychain — fall back to empty password (will fail auth).
+                authMethod = .password("")
+            }
+        } else {
+            var password = ""
+            let account = "password-\(savedState.connectionID)"
+            if let data = try? await keychain.load(account: account) {
+                password = String(data: data, encoding: .utf8) ?? ""
+            }
+            authMethod = .password(password)
         }
 
         let config = SSHConnectionConfig(
             host: savedState.sshHost,
             port: savedState.sshPort,
             username: savedState.sshUsername,
-            authMethod: .password(password)
+            authMethod: authMethod
         )
 
         let transport = MoshTransport(resuming: savedState, config: config)
@@ -180,6 +213,31 @@ final class SessionManager {
         }
 
         return session
+    }
+
+    // MARK: - Key Conversion
+
+    /// Convert a parsed SSH key into a NIOSSHPrivateKey for use with NIOSSH.
+    private static func makeNIOSSHPrivateKey(from parsedKey: ParsedSSHKey) throws -> NIOSSHPrivateKey {
+        switch parsedKey.keyType {
+        case .ed25519:
+            let privateKey = try Curve25519.Signing.PrivateKey(
+                rawRepresentation: parsedKey.privateKeyData
+            )
+            return NIOSSHPrivateKey(ed25519Key: privateKey)
+        case .ecdsaP256:
+            let privateKey = try P256.Signing.PrivateKey(
+                rawRepresentation: parsedKey.privateKeyData
+            )
+            return NIOSSHPrivateKey(p256Key: privateKey)
+        case .ecdsaP384:
+            let privateKey = try P384.Signing.PrivateKey(
+                rawRepresentation: parsedKey.privateKeyData
+            )
+            return NIOSSHPrivateKey(p384Key: privateKey)
+        case .rsa:
+            throw SSHTransportError.authenticationFailed
+        }
     }
 
     /// Save all active mosh sessions for later resumption.

@@ -223,24 +223,38 @@ struct ConnectionListView: View {
     }
 
     private func connectTo(_ connection: ServerConnection) {
-        // If password auth and no transient password, check Keychain. If missing, prompt.
-        if connection.authMethod == .password && connection.password.isEmpty {
-            let account = "password-\(connection.id.uuidString)"
+        switch connection.authMethod {
+        case .publicKey:
+            // Verify the private key is stored in Keychain before connecting.
+            let account = "private-key-\(connection.id.uuidString)"
             Task {
                 let keychain = KeychainManager()
                 let stored = try? await keychain.load(account: account)
                 if stored == nil {
-                    // No stored password — prompt user.
-                    connectPassword = ""
-                    pendingConnection = connection
-                    showPasswordPrompt = true
+                    connectionError = "No private key found. Edit the connection to add one."
                     return
                 }
-                // Password is in Keychain, SessionManager will load it.
                 await doConnect(connection)
             }
-        } else {
-            Task { await doConnect(connection) }
+
+        case .password, .keyboardInteractive:
+            // If password auth and no transient password, check Keychain. If missing, prompt.
+            if connection.password.isEmpty {
+                let account = "password-\(connection.id.uuidString)"
+                Task {
+                    let keychain = KeychainManager()
+                    let stored = try? await keychain.load(account: account)
+                    if stored == nil {
+                        connectPassword = ""
+                        pendingConnection = connection
+                        showPasswordPrompt = true
+                        return
+                    }
+                    await doConnect(connection)
+                }
+            } else {
+                Task { await doConnect(connection) }
+            }
         }
     }
 

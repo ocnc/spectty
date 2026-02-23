@@ -22,6 +22,9 @@ public struct MoshSessionState: Codable, Sendable {
     public let sshPort: Int
     public let sshUsername: String
 
+    // Auth method for resumption ("password" | "publicKey"); nil defaults to password.
+    public let authMethodType: String?
+
     // Staleness check
     public let savedAt: Date
 
@@ -38,6 +41,7 @@ public struct MoshSessionState: Codable, Sendable {
         sshHost: String,
         sshPort: Int,
         sshUsername: String,
+        authMethodType: String? = nil,
         savedAt: Date = Date()
     ) {
         self.sessionID = sessionID
@@ -52,6 +56,7 @@ public struct MoshSessionState: Codable, Sendable {
         self.sshHost = sshHost
         self.sshPort = sshPort
         self.sshUsername = sshUsername
+        self.authMethodType = authMethodType
         self.savedAt = savedAt
     }
 }

@@ -48,6 +48,11 @@ final class ServerConnection {
     @Transient
     var password: String = ""
 
+    /// Transient private key PEM — not persisted to SwiftData, only lives in memory
+    /// for the duration of an editing session.
+    @Transient
+    var privateKeyPEM: String = ""
+
     init(
         name: String = "",
         host: String = "",
