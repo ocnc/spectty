@@ -246,15 +246,60 @@ public struct SSHKeyImporter: Sendable {
         // curve identifier
         _ = try reader.readString()
         let publicKey = try reader.readBytes()
-        let privateKey = try reader.readBytes()
+        let privateKeyRaw = try reader.readBytes()
         // comment (ignored)
         _ = try? reader.readString()
+
+        // Determine the expected sizes for this curve.
+        let scalarLength: Int
+        let uncompressedPointLength: Int
+        switch keyType {
+        case .ecdsaP256:
+            scalarLength = 32
+            uncompressedPointLength = 65  // 0x04 + 32 + 32
+        case .ecdsaP384:
+            scalarLength = 48
+            uncompressedPointLength = 97  // 0x04 + 48 + 48
+        default:
+            throw SSHKeyImportError.invalidKeyFormat
+        }
+
+        // Validate the uncompressed EC public key point size.
+        guard publicKey.count == uncompressedPointLength else {
+            throw SSHKeyImportError.invalidKeyFormat
+        }
+
+        // OpenSSH encodes the private scalar as an mpint (SSH bignum2):
+        // - A leading 0x00 byte is prepended when the high bit is set (~50% of keys).
+        // - Leading zero bytes may be stripped (rare).
+        // Normalize to the exact fixed-width scalar CryptoKit expects.
+        let privateKey = normalizeMpint(privateKeyRaw, toLength: scalarLength)
+        guard privateKey.count == scalarLength else {
+            throw SSHKeyImportError.invalidKeyFormat
+        }
 
         return ParsedSSHKey(
             keyType: keyType,
             publicKeyData: publicKey,
             privateKeyData: privateKey
         )
+    }
+
+    /// Normalize an SSH mpint-encoded scalar to a fixed-width byte array.
+    ///
+    /// Strips a leading `0x00` sign byte (added when the high bit is set) and
+    /// left-pads short representations to the required length.
+    private static func normalizeMpint(_ data: Data, toLength length: Int) -> Data {
+        var trimmed = data[...]
+        // Strip leading zero bytes that exceed the target length (mpint sign padding).
+        while trimmed.count > length, trimmed.first == 0x00 {
+            trimmed = trimmed.dropFirst()
+        }
+        // Left-pad if the scalar is shorter than expected (rare but valid).
+        if trimmed.count < length {
+            return Data(repeating: 0, count: length - trimmed.count) + trimmed
+        }
+        return Data(trimmed)
     }
 }
 

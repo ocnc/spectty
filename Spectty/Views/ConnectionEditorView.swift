@@ -1,4 +1,5 @@
 import SwiftUI
+import CryptoKit
 import SpecttyKeychain
 
 struct ConnectionEditorView: View {
@@ -173,6 +174,19 @@ struct ConnectionEditorView: View {
                 return
             }
 
+            // Trial CryptoKit construction — surface encoding errors at edit time,
+            // not at connection time.
+            switch parsed.keyType {
+            case .ed25519:
+                _ = try Curve25519.Signing.PrivateKey(rawRepresentation: parsed.privateKeyData)
+            case .ecdsaP256:
+                _ = try P256.Signing.PrivateKey(rawRepresentation: parsed.privateKeyData)
+            case .ecdsaP384:
+                _ = try P384.Signing.PrivateKey(rawRepresentation: parsed.privateKeyData)
+            case .rsa:
+                break // Already rejected above
+            }
+
             keyValidationError = nil
 
             // Derive OpenSSH public key for display
@@ -242,19 +256,27 @@ struct ConnectionEditorView: View {
 
     private func saveCredentialsToKeychain() async {
         let keychain = KeychainManager()
+        let uuid = connection.id.uuidString
 
         switch connection.authMethod {
         case .password:
+            // Clean up the key from the other auth method.
+            try? await keychain.delete(account: "private-key-\(uuid)")
+            connection.privateKeyKeychainAccount = nil
+
             guard !connection.password.isEmpty else { return }
-            let account = "password-\(connection.id.uuidString)"
+            let account = "password-\(uuid)"
             try? await keychain.saveOrUpdate(
                 key: Data(connection.password.utf8),
                 account: account
             )
 
         case .publicKey:
+            // Clean up the credential from the other auth method.
+            try? await keychain.delete(account: "password-\(uuid)")
+
             guard !connection.privateKeyPEM.isEmpty else { return }
-            let account = "private-key-\(connection.id.uuidString)"
+            let account = "private-key-\(uuid)"
             try? await keychain.saveOrUpdate(
                 key: Data(connection.privateKeyPEM.utf8),
                 account: account
@@ -262,7 +284,10 @@ struct ConnectionEditorView: View {
             connection.privateKeyKeychainAccount = account
 
         case .keyboardInteractive:
-            break
+            // Clean up credentials from both other methods.
+            try? await keychain.delete(account: "password-\(uuid)")
+            try? await keychain.delete(account: "private-key-\(uuid)")
+            connection.privateKeyKeychainAccount = nil
         }
     }
 }

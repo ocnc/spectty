@@ -165,8 +165,9 @@ final class SessionManager {
                let nioKey = try? Self.makeNIOSSHPrivateKey(from: parsedKey) {
                 authMethod = .publicKey(nioKey)
             } else {
-                // Key missing from Keychain — fall back to empty password (will fail auth).
-                authMethod = .password("")
+                throw SSHTransportError.connectionFailed(
+                    "Private key no longer available in Keychain. Please re-enter your key in the connection editor."
+                )
             }
         } else {
             var password = ""
