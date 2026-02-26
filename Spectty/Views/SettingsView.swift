@@ -1,4 +1,5 @@
 import SwiftUI
+import LocalAuthentication
 
 struct SettingsView: View {
     @AppStorage("defaultFontName") private var fontName = "Menlo"
@@ -6,6 +7,14 @@ struct SettingsView: View {
     @AppStorage("defaultColorScheme") private var colorScheme = "Default"
     @AppStorage("scrollbackLines") private var scrollbackLines = 10_000
     @AppStorage("cursorStyle") private var cursorStyle = "block"
+    @AppStorage("privacyModeEnabled") private var privacyModeEnabled = false
+    @AppStorage("biometricUnlockEnabled") private var biometricUnlockEnabled = false
+
+    @Environment(PrivacyLockManager.self) private var lockManager
+    @State private var showPINSetup = false
+    @State private var showPINChange = false
+    @State private var showRemoveConfirmation = false
+    @State private var pinSetupMode: PINSetupView.Mode = .create
 
     var body: some View {
         Form {
@@ -37,6 +46,57 @@ struct SettingsView: View {
                         .multilineTextAlignment(.trailing)
                         .frame(width: 80)
                 }
+            }
+
+            Section("Security") {
+                Toggle("Privacy Mode", isOn: $privacyModeEnabled)
+                    .onChange(of: privacyModeEnabled) { _, enabled in
+                        if enabled && !lockManager.hasPIN {
+                            pinSetupMode = .create
+                            showPINSetup = true
+                        } else if !enabled && lockManager.hasPIN {
+                            showRemoveConfirmation = true
+                        }
+                    }
+
+                if privacyModeEnabled && lockManager.hasPIN {
+                    Button("Change PIN") {
+                        pinSetupMode = .change
+                        showPINChange = true
+                    }
+                }
+
+                if privacyModeEnabled && lockManager.hasPIN && lockManager.biometricsAvailable {
+                    let name = lockManager.biometricType == .faceID ? "Face ID" : "Touch ID"
+                    Toggle("Unlock with \(name)", isOn: $biometricUnlockEnabled)
+                }
+            }
+            .sheet(isPresented: $showPINSetup, onDismiss: {
+                if !lockManager.hasPIN {
+                    privacyModeEnabled = false
+                }
+            }) {
+                PINSetupView(mode: .create)
+            }
+            .sheet(isPresented: $showPINChange) {
+                PINSetupView(mode: .change)
+            }
+            .confirmationDialog(
+                "Remove PIN?",
+                isPresented: $showRemoveConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Remove PIN", role: .destructive) {
+                    biometricUnlockEnabled = false
+                    Task {
+                        try? await lockManager.removePIN()
+                    }
+                }
+                Button("Cancel", role: .cancel) {
+                    privacyModeEnabled = true
+                }
+            } message: {
+                Text("This will disable privacy mode and remove your PIN.")
             }
 
             Section("Theme") {

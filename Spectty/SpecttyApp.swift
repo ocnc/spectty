@@ -4,6 +4,7 @@ import SwiftData
 @main
 struct SpecttyApp: App {
     @State private var sessionManager = SessionManager()
+    @State private var lockManager = PrivacyLockManager()
     @Environment(\.scenePhase) private var scenePhase
 
     var sharedModelContainer: ModelContainer = {
@@ -20,6 +21,7 @@ struct SpecttyApp: App {
         WindowGroup {
             ContentRoot()
                 .environment(sessionManager)
+                .environment(lockManager)
                 .task {
                     await sessionManager.autoResumeSessions()
                 }
@@ -29,11 +31,13 @@ struct SpecttyApp: App {
             if newPhase == .active {
                 Task { @MainActor in
                     await sessionManager.checkAllConnections()
+                    lockManager.appDidBecomeActive()
                 }
             }
             if newPhase == .background {
                 Task { @MainActor in
                     await sessionManager.saveActiveSessions()
+                    lockManager.appDidEnterBackground()
                 }
             }
         }
@@ -44,17 +48,26 @@ struct SpecttyApp: App {
 private struct ContentRoot: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(SessionManager.self) private var sessionManager
+    @Environment(PrivacyLockManager.self) private var lockManager
     @State private var connectionStore: ConnectionStore?
 
     var body: some View {
-        Group {
-            if let store = connectionStore {
-                ConnectionListView()
-                    .environment(store)
-            } else {
-                ProgressView()
+        ZStack {
+            Group {
+                if let store = connectionStore {
+                    ConnectionListView()
+                        .environment(store)
+                } else {
+                    ProgressView()
+                }
+            }
+
+            if lockManager.isLocked {
+                LockScreenView()
+                    .transition(.opacity)
             }
         }
+        .animation(.default, value: lockManager.isLocked)
         .onAppear {
             if connectionStore == nil {
                 connectionStore = ConnectionStore(modelContext: modelContext)
