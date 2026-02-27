@@ -28,6 +28,9 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
     /// Callback for paste data (bracketed paste aware).
     public var onPaste: ((Data) -> Void)?
 
+    /// Callback for edge-swipe gestures (session switching).
+    public var onEdgeSwipe: ((EdgeSwipeEvent) -> Void)?
+
     /// Current font configuration.
     public private(set) var terminalFont = TerminalFont()
 
@@ -141,6 +144,9 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
         }
         handler.onShowMenu = { [weak self] point in
             self?.presentEditMenu(at: point)
+        }
+        handler.onEdgeSwipe = { [weak self] event in
+            self?.onEdgeSwipe?(event)
         }
         // Handle-drag updates from the selection overlay.
         selectionView.onSelectionChanged = { [weak self, weak handler] selection in

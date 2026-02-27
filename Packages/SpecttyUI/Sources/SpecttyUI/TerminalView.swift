@@ -10,26 +10,32 @@ public struct TerminalView: UIViewRepresentable {
     private let onKeyInput: ((KeyEvent) -> Void)?
     private let onPaste: ((Data) -> Void)?
     private let onResize: ((Int, Int) -> Void)?
+    private let onEdgeSwipe: ((EdgeSwipeEvent) -> Void)?
     private let font: TerminalFont
     private let themeName: String
     private let cursorStyle: CursorStyle
+    private let autoFocus: Bool
 
     public init(
         emulator: any TerminalEmulator,
         font: TerminalFont = TerminalFont(),
         themeName: String = "Default",
         cursorStyle: CursorStyle = .block,
+        autoFocus: Bool = true,
         onKeyInput: ((KeyEvent) -> Void)? = nil,
         onPaste: ((Data) -> Void)? = nil,
-        onResize: ((Int, Int) -> Void)? = nil
+        onResize: ((Int, Int) -> Void)? = nil,
+        onEdgeSwipe: ((EdgeSwipeEvent) -> Void)? = nil
     ) {
         self.emulator = emulator
         self.font = font
         self.themeName = themeName
         self.cursorStyle = cursorStyle
+        self.autoFocus = autoFocus
         self.onKeyInput = onKeyInput
         self.onPaste = onPaste
         self.onResize = onResize
+        self.onEdgeSwipe = onEdgeSwipe
     }
 
     public func makeCoordinator() -> Coordinator {
@@ -41,6 +47,7 @@ public struct TerminalView: UIViewRepresentable {
         coordinator.onKeyInput = onKeyInput
         coordinator.onPaste = onPaste
         coordinator.onResize = onResize
+        coordinator.onEdgeSwipe = onEdgeSwipe
 
         let metalView = TerminalMetalView(frame: .zero, emulator: emulator)
         metalView.onKeyInput = { [weak coordinator] event in
@@ -52,13 +59,18 @@ public struct TerminalView: UIViewRepresentable {
         metalView.onResize = { [weak coordinator] cols, rows in
             coordinator?.onResize?(cols, rows)
         }
+        metalView.onEdgeSwipe = { [weak coordinator] event in
+            coordinator?.onEdgeSwipe?(event)
+        }
         metalView.setFont(font)
         metalView.setTheme(TerminalTheme.named(themeName))
         metalView.setCursorStyle(cursorStyle)
 
         // Auto-focus once on creation to show the keyboard.
-        DispatchQueue.main.async {
-            metalView.becomeFirstResponder()
+        if autoFocus {
+            DispatchQueue.main.async {
+                metalView.becomeFirstResponder()
+            }
         }
 
         return metalView
@@ -69,6 +81,7 @@ public struct TerminalView: UIViewRepresentable {
         coordinator.onKeyInput = onKeyInput
         coordinator.onPaste = onPaste
         coordinator.onResize = onResize
+        coordinator.onEdgeSwipe = onEdgeSwipe
         uiView.setFont(font)
         uiView.setTheme(TerminalTheme.named(themeName))
         uiView.setCursorStyle(cursorStyle)
@@ -78,5 +91,6 @@ public struct TerminalView: UIViewRepresentable {
         var onKeyInput: ((KeyEvent) -> Void)?
         var onPaste: ((Data) -> Void)?
         var onResize: ((Int, Int) -> Void)?
+        var onEdgeSwipe: ((EdgeSwipeEvent) -> Void)?
     }
 }

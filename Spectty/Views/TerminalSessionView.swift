@@ -5,6 +5,9 @@ import SpecttyTransport
 
 struct TerminalSessionView: View {
     let session: TerminalSession
+    var onEdgeSwipe: ((EdgeSwipeEvent) -> Void)? = nil
+    var onDisconnect: ((TerminalSession) -> Void)? = nil
+    var autoFocus: Bool = true
     @Environment(SessionManager.self) private var sessionManager
     @Environment(\.dismiss) private var dismiss
     @AppStorage("defaultFontName") private var fontName = "Menlo"
@@ -22,6 +25,7 @@ struct TerminalSessionView: View {
                 font: TerminalFont(name: fontName, size: CGFloat(fontSize)),
                 themeName: colorScheme,
                 cursorStyle: CursorStyle(rawValue: cursorStyle) ?? .block,
+                autoFocus: autoFocus,
                 onKeyInput: { event in
                     session.sendKey(event)
                 },
@@ -30,7 +34,8 @@ struct TerminalSessionView: View {
                 },
                 onResize: { columns, rows in
                     session.resize(columns: columns, rows: rows)
-                }
+                },
+                onEdgeSwipe: onEdgeSwipe
             )
 
             // Connection status overlay.
@@ -79,8 +84,12 @@ struct TerminalSessionView: View {
         }
         .confirmationDialog("Disconnect from \(session.connectionName)?", isPresented: $showDisconnectConfirm, titleVisibility: .visible) {
             Button("Disconnect", role: .destructive) {
-                sessionManager.disconnect(session)
-                dismiss()
+                if let onDisconnect {
+                    onDisconnect(session)
+                } else {
+                    sessionManager.disconnect(session)
+                    dismiss()
+                }
             }
             Button("Cancel", role: .cancel) {}
         }

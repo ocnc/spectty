@@ -18,6 +18,33 @@ final class SessionManager {
         sessions.first { $0.id == activeSessionID }
     }
 
+    // MARK: - Session Navigation
+
+    var activeSessionIndex: Int? {
+        sessions.firstIndex(where: { $0.id == activeSessionID })
+    }
+
+    var hasNextSession: Bool { nextSession() != nil }
+    var hasPreviousSession: Bool { previousSession() != nil }
+
+    func nextSession() -> TerminalSession? {
+        guard let index = activeSessionIndex, index + 1 < sessions.count else { return nil }
+        return sessions[index + 1]
+    }
+
+    func previousSession() -> TerminalSession? {
+        guard let index = activeSessionIndex, index - 1 >= 0 else { return nil }
+        return sessions[index - 1]
+    }
+
+    func switchToNext() {
+        if let next = nextSession() { activeSessionID = next.id }
+    }
+
+    func switchToPrevious() {
+        if let prev = previousSession() { activeSessionID = prev.id }
+    }
+
     /// Create and start a new session for a server connection.
     func connect(to connection: ServerConnection) async throws -> TerminalSession {
         // Resolve password: use transient value if set, otherwise load from Keychain.

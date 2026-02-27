@@ -1,6 +1,17 @@
 import UIKit
 import SpecttyTerminal
 
+/// Describes an edge-swipe gesture for session switching.
+public struct EdgeSwipeEvent {
+    public enum Direction { case left, right }
+    public enum Phase { case began, changed, ended, cancelled }
+
+    public let direction: Direction
+    public let phase: Phase
+    public let translation: CGFloat
+    public let velocity: CGFloat
+}
+
 /// Handles gestures on the terminal view: scroll, pinch-to-zoom, selection.
 @MainActor
 public final class GestureHandler: NSObject {
@@ -19,7 +30,12 @@ public final class GestureHandler: NSObject {
     /// Callback to request the edit menu (copy/paste) at a given point.
     public var onShowMenu: ((CGPoint) -> Void)?
 
+    /// Callback for edge-swipe gestures (session switching).
+    public var onEdgeSwipe: ((EdgeSwipeEvent) -> Void)?
+
     private var panGesture: UIPanGestureRecognizer?
+    private var leftEdgeGesture: UIScreenEdgePanGestureRecognizer?
+    private var rightEdgeGesture: UIScreenEdgePanGestureRecognizer?
     private var pinchGesture: UIPinchGestureRecognizer?
     private var longPressGesture: UILongPressGestureRecognizer?
     private var twoFingerTapGesture: UITapGestureRecognizer?
@@ -62,6 +78,21 @@ public final class GestureHandler: NSObject {
         twoFingerTap.numberOfTouchesRequired = 2
         metalView.addGestureRecognizer(twoFingerTap)
         self.twoFingerTapGesture = twoFingerTap
+
+        // Edge swipe for session switching.
+        let leftEdge = UIScreenEdgePanGestureRecognizer(target: self, action: #selector(handleEdgePan(_:)))
+        leftEdge.edges = .left
+        metalView.addGestureRecognizer(leftEdge)
+        self.leftEdgeGesture = leftEdge
+
+        let rightEdge = UIScreenEdgePanGestureRecognizer(target: self, action: #selector(handleEdgePan(_:)))
+        rightEdge.edges = .right
+        metalView.addGestureRecognizer(rightEdge)
+        self.rightEdgeGesture = rightEdge
+
+        // Scroll pan defers to edge pans near the edges.
+        pan.require(toFail: leftEdge)
+        pan.require(toFail: rightEdge)
     }
 
     // MARK: - Pan (Scroll)
@@ -201,5 +232,32 @@ public final class GestureHandler: NSObject {
         }
 
         onMouseEvent?(pasteData)
+    }
+
+    // MARK: - Edge Pan (Session Switching)
+
+    @objc private func handleEdgePan(_ gesture: UIScreenEdgePanGestureRecognizer) {
+        guard let metalView = metalView else { return }
+
+        let direction: EdgeSwipeEvent.Direction = gesture.edges == .left ? .left : .right
+        let translation = gesture.translation(in: metalView).x
+        let velocity = gesture.velocity(in: metalView).x
+
+        let phase: EdgeSwipeEvent.Phase
+        switch gesture.state {
+        case .began: phase = .began
+        case .changed: phase = .changed
+        case .ended: phase = .ended
+        case .cancelled, .failed: phase = .cancelled
+        default: return
+        }
+
+        let event = EdgeSwipeEvent(
+            direction: direction,
+            phase: phase,
+            translation: translation,
+            velocity: velocity
+        )
+        onEdgeSwipe?(event)
     }
 }

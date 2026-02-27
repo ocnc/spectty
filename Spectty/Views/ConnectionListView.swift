@@ -9,7 +9,7 @@ struct ConnectionListView: View {
     @State private var isNewConnection = false
     @State private var showingQuickConnect = false
     @State private var quickConnectHost = ""
-    @State private var navigationPath = NavigationPath()
+    @State private var showCarousel = false
     @State private var connectionError: String?
     @State private var pendingConnection: ServerConnection?
     @State private var connectPassword = ""
@@ -18,14 +18,14 @@ struct ConnectionListView: View {
     @State private var sessionRenameText = ""
 
     var body: some View {
-        NavigationStack(path: $navigationPath) {
+        NavigationStack {
             List {
                 if !sessionManager.sessions.isEmpty {
                     Section("Active Sessions") {
                         ForEach(sessionManager.sessions) { session in
                             Button {
                                 sessionManager.activeSessionID = session.id
-                                navigationPath.append(session.id)
+                                showCarousel = true
                             } label: {
                                 HStack {
                                     Image(systemName: "terminal")
@@ -151,16 +151,8 @@ struct ConnectionListView: View {
             } message: {
                 Text("Enter user@host or user@host:port")
             }
-            .navigationDestination(for: UUID.self) { sessionID in
-                if let session = sessionManager.sessions.first(where: { $0.id == sessionID }) {
-                    TerminalSessionView(session: session)
-                } else {
-                    ContentUnavailableView(
-                        "Session Ended",
-                        systemImage: "terminal",
-                        description: Text("This session is no longer active.")
-                    )
-                }
+            .navigationDestination(isPresented: $showCarousel) {
+                SessionCarouselView()
             }
             .alert("Connection Failed", isPresented: .init(
                 get: { connectionError != nil },
@@ -246,10 +238,10 @@ struct ConnectionListView: View {
 
     private func doConnect(_ connection: ServerConnection) async {
         do {
-            let session = try await sessionManager.connect(to: connection)
+            _ = try await sessionManager.connect(to: connection)
             connection.lastConnected = Date()
             connectionStore.save()
-            navigationPath.append(session.id)
+            showCarousel = true
         } catch {
             connectionError = String(describing: error)
         }
