@@ -37,6 +37,14 @@ final class SessionManager {
         return sessions[index - 1]
     }
 
+    /// Resize all sessions to the current grid size.
+    /// Keeps background sessions in sync so switching never triggers a resize.
+    func resizeAllSessions(columns: Int, rows: Int) {
+        for session in sessions {
+            session.resize(columns: columns, rows: rows)
+        }
+    }
+
     func switchToNext() {
         if let next = nextSession() { activeSessionID = next.id }
     }

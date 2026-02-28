@@ -6,6 +6,7 @@ struct TerminalSessionView: View {
     let session: TerminalSession
     var onEdgeSwipe: ((EdgeSwipeEvent) -> Void)? = nil
     var autoFocus: Bool = true
+    @Environment(SessionManager.self) private var sessionManager
     @AppStorage("defaultFontName") private var fontName = "Menlo"
     @AppStorage("defaultFontSize") private var fontSize = 14.0
     @AppStorage("defaultColorScheme") private var colorScheme = "Default"
@@ -26,7 +27,7 @@ struct TerminalSessionView: View {
                     session.sendData(data)
                 },
                 onResize: { columns, rows in
-                    session.resize(columns: columns, rows: rows)
+                    sessionManager.resizeAllSessions(columns: columns, rows: rows)
                 },
                 onEdgeSwipe: onEdgeSwipe
             )
