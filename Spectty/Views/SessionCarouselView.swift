@@ -21,7 +21,6 @@ struct SessionCarouselView: View {
                         session: adjacent,
                         autoFocus: false
                     )
-                    .id(adjacent.id)
                     .offset(x: adjacentOffset(direction: direction, width: geo.size.width))
                 }
 
@@ -31,7 +30,6 @@ struct SessionCarouselView: View {
                         session: active,
                         onEdgeSwipe: { handleEdgeSwipe($0, width: geo.size.width) }
                     )
-                    .id(active.id)
                     .offset(x: dragOffset)
                 }
             }

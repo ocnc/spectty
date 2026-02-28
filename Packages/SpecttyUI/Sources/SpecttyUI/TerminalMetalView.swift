@@ -132,6 +132,18 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
         }
     }
 
+    /// Swap the terminal emulator without recreating the view.
+    /// Preserves first-responder status (keyboard stays up).
+    public func setEmulator(_ emulator: any TerminalEmulator) {
+        self.terminalEmulator = emulator
+        self.scrollOffset = 0
+        gestureHandler?.removeGestures()
+        setupGestureHandler(emulator: emulator)
+        // Reset so the new emulator gets the current grid size.
+        lastReportedGridSize = (0, 0)
+        notifyResizeIfNeeded()
+    }
+
     private func setupGestureHandler(emulator: any TerminalEmulator) {
         let handler = GestureHandler(metalView: self, emulator: emulator)
         handler.onMouseEvent = { [weak self] data in

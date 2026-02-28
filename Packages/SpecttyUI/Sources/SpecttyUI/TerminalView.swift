@@ -48,6 +48,7 @@ public struct TerminalView: UIViewRepresentable {
         coordinator.onPaste = onPaste
         coordinator.onResize = onResize
         coordinator.onEdgeSwipe = onEdgeSwipe
+        coordinator.emulatorID = ObjectIdentifier(emulator)
 
         let metalView = TerminalMetalView(frame: .zero, emulator: emulator)
         metalView.onKeyInput = { [weak coordinator] event in
@@ -82,6 +83,14 @@ public struct TerminalView: UIViewRepresentable {
         coordinator.onPaste = onPaste
         coordinator.onResize = onResize
         coordinator.onEdgeSwipe = onEdgeSwipe
+
+        // Swap emulator in-place if it changed (e.g. carousel session switch).
+        let newID = ObjectIdentifier(emulator)
+        if coordinator.emulatorID != newID {
+            coordinator.emulatorID = newID
+            uiView.setEmulator(emulator)
+        }
+
         uiView.setFont(font)
         uiView.setTheme(TerminalTheme.named(themeName))
         uiView.setCursorStyle(cursorStyle)
@@ -92,5 +101,6 @@ public struct TerminalView: UIViewRepresentable {
         var onPaste: ((Data) -> Void)?
         var onResize: ((Int, Int) -> Void)?
         var onEdgeSwipe: ((EdgeSwipeEvent) -> Void)?
+        var emulatorID: ObjectIdentifier?
     }
 }

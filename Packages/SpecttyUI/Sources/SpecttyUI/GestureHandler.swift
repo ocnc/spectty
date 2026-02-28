@@ -52,6 +52,17 @@ public final class GestureHandler: NSObject {
         setupGestures()
     }
 
+    /// Remove all gesture recognizers from the metal view.
+    public func removeGestures() {
+        guard let metalView = metalView else { return }
+        [panGesture, pinchGesture, longPressGesture, twoFingerTapGesture].compactMap { $0 }.forEach {
+            metalView.removeGestureRecognizer($0)
+        }
+        [leftEdgeGesture, rightEdgeGesture].compactMap { $0 }.forEach {
+            metalView.removeGestureRecognizer($0)
+        }
+    }
+
     private func setupGestures() {
         guard let metalView = metalView else { return }
 
