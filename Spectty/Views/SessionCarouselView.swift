@@ -8,6 +8,9 @@ struct SessionCarouselView: View {
     @State private var dragOffset: CGFloat = 0
     @State private var adjacentSession: TerminalSession?
     @State private var swipeDirection: EdgeSwipeEvent.Direction?
+    @State private var showDisconnectConfirm = false
+    @State private var showRenameAlert = false
+    @State private var renameText = ""
 
     var body: some View {
         GeometryReader { geo in
@@ -16,9 +19,9 @@ struct SessionCarouselView: View {
                 if let adjacent = adjacentSession, let direction = swipeDirection {
                     TerminalSessionView(
                         session: adjacent,
-                        onDisconnect: { handleDisconnect($0) },
                         autoFocus: false
                     )
+                    .id(adjacent.id)
                     .offset(x: adjacentOffset(direction: direction, width: geo.size.width))
                 }
 
@@ -26,14 +29,82 @@ struct SessionCarouselView: View {
                 if let active = sessionManager.activeSession {
                     TerminalSessionView(
                         session: active,
-                        onEdgeSwipe: { handleEdgeSwipe($0, width: geo.size.width) },
-                        onDisconnect: { handleDisconnect($0) }
+                        onEdgeSwipe: { handleEdgeSwipe($0, width: geo.size.width) }
                     )
+                    .id(active.id)
                     .offset(x: dragOffset)
                 }
             }
         }
         .navigationBarBackButtonHidden(sessionManager.hasPreviousSession)
+        .navigationTitle(activeTitle)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                HStack(spacing: 12) {
+                    Button {
+                        dismissKeyboard()
+                    } label: {
+                        Image(systemName: "keyboard.chevron.compact.down")
+                    }
+
+                    Menu {
+                        Button {
+                            if let session = sessionManager.activeSession {
+                                UIPasteboard.general.string.map { text in
+                                    session.sendData(Data(text.utf8))
+                                }
+                            }
+                        } label: {
+                            Label("Paste", systemImage: "doc.on.clipboard")
+                        }
+
+                        Button {
+                            if let session = sessionManager.activeSession {
+                                renameText = session.connectionName
+                                showRenameAlert = true
+                            }
+                        } label: {
+                            Label("Rename", systemImage: "pencil")
+                        }
+
+                        Divider()
+
+                        Button(role: .destructive) {
+                            showDisconnectConfirm = true
+                        } label: {
+                            Label("Disconnect", systemImage: "xmark.circle")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                }
+            }
+        }
+        .confirmationDialog(
+            "Disconnect from \(sessionManager.activeSession?.connectionName ?? "")?",
+            isPresented: $showDisconnectConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Disconnect", role: .destructive) {
+                if let session = sessionManager.activeSession {
+                    handleDisconnect(session)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+        .alert("Rename Session", isPresented: $showRenameAlert) {
+            TextField("Session name", text: $renameText)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            Button("Save") {
+                let trimmed = renameText.trimmingCharacters(in: .whitespaces)
+                if !trimmed.isEmpty {
+                    sessionManager.activeSession?.connectionName = trimmed
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
         .overlay(alignment: .bottom) {
             if sessionManager.sessions.count > 1 {
                 pageIndicator
@@ -43,6 +114,15 @@ struct SessionCarouselView: View {
         .onChange(of: sessionManager.sessions.count) { _, newCount in
             if newCount == 0 { dismiss() }
         }
+    }
+
+    private var activeTitle: String {
+        guard let session = sessionManager.activeSession else { return "" }
+        return session.title.isEmpty ? session.connectionName : session.title
+    }
+
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 
     // MARK: - Edge Swipe

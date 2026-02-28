@@ -1,22 +1,15 @@
 import SwiftUI
 import SpecttyUI
-import SpecttyTerminal
 import SpecttyTransport
 
 struct TerminalSessionView: View {
     let session: TerminalSession
     var onEdgeSwipe: ((EdgeSwipeEvent) -> Void)? = nil
-    var onDisconnect: ((TerminalSession) -> Void)? = nil
     var autoFocus: Bool = true
-    @Environment(SessionManager.self) private var sessionManager
-    @Environment(\.dismiss) private var dismiss
     @AppStorage("defaultFontName") private var fontName = "Menlo"
     @AppStorage("defaultFontSize") private var fontSize = 14.0
     @AppStorage("defaultColorScheme") private var colorScheme = "Default"
     @AppStorage("cursorStyle") private var cursorStyle = "block"
-    @State private var showDisconnectConfirm = false
-    @State private var showRenameAlert = false
-    @State private var renameText = ""
 
     var body: some View {
         ZStack {
@@ -41,74 +34,6 @@ struct TerminalSessionView: View {
             // Connection status overlay.
             connectionOverlay
         }
-        .navigationTitle(session.title.isEmpty ? session.connectionName : session.title)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                HStack(spacing: 12) {
-                    Button {
-                        // Global dismiss/show — the tap gesture on the terminal view handles show.
-                        dismissKeyboard()
-                    } label: {
-                        Image(systemName: "keyboard.chevron.compact.down")
-                    }
-
-                    Menu {
-                        Button {
-                            UIPasteboard.general.string.map { text in
-                                session.sendData(Data(text.utf8))
-                            }
-                        } label: {
-                            Label("Paste", systemImage: "doc.on.clipboard")
-                        }
-
-                        Button {
-                            renameText = session.connectionName
-                            showRenameAlert = true
-                        } label: {
-                            Label("Rename", systemImage: "pencil")
-                        }
-
-                        Divider()
-
-                        Button(role: .destructive) {
-                            showDisconnectConfirm = true
-                        } label: {
-                            Label("Disconnect", systemImage: "xmark.circle")
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                    }
-                }
-            }
-        }
-        .confirmationDialog("Disconnect from \(session.connectionName)?", isPresented: $showDisconnectConfirm, titleVisibility: .visible) {
-            Button("Disconnect", role: .destructive) {
-                if let onDisconnect {
-                    onDisconnect(session)
-                } else {
-                    sessionManager.disconnect(session)
-                    dismiss()
-                }
-            }
-            Button("Cancel", role: .cancel) {}
-        }
-        .alert("Rename Session", isPresented: $showRenameAlert) {
-            TextField("Session name", text: $renameText)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-            Button("Save") {
-                let trimmed = renameText.trimmingCharacters(in: .whitespaces)
-                if !trimmed.isEmpty {
-                    session.connectionName = trimmed
-                }
-            }
-            Button("Cancel", role: .cancel) {}
-        }
-    }
-
-    private func dismissKeyboard() {
-        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 
     @ViewBuilder
