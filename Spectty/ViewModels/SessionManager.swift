@@ -81,8 +81,9 @@ final class SessionManager {
         }
 
         let scrollbackLines = UserDefaults.standard.integer(forKey: "scrollbackLines")
+        let transportType = connection.transport
         let transportFactory: @Sendable () -> any TerminalTransport = {
-            switch connection.transport {
+            switch transportType {
             case .ssh:
                 return SSHTransport(config: config)
             case .mosh:
