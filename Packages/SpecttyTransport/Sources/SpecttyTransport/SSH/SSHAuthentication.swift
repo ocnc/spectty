@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import NIOCore
 import NIOSSH
 
@@ -97,18 +98,62 @@ extension SSHPublicKeyDelegate: @unchecked Sendable {}
 
 // MARK: - Host Key Delegate
 
-/// Placeholder server authentication delegate that accepts all host keys.
-///
-/// **WARNING**: This is insecure. A real implementation should verify the
-/// host key against a known-hosts database.
-final class AcceptAllHostKeysDelegate: NIOSSHClientServerAuthenticationDelegate {
+/// Server authentication delegate using TOFU (Trust On First Use).
+final class TOFUHostKeysDelegate: NIOSSHClientServerAuthenticationDelegate {
+    private let host: String
+    private let port: Int
+    private let trustStore: SSHHostKeyTrustStore
+
+    init(host: String, port: Int, trustStore: SSHHostKeyTrustStore = .shared) {
+        self.host = host
+        self.port = port
+        self.trustStore = trustStore
+    }
+
     func validateHostKey(
         hostKey: NIOSSHPublicKey,
         validationCompletePromise: EventLoopPromise<Void>
     ) {
-        // TODO: Replace with real host key verification (known_hosts, TOFU, etc.)
-        validationCompletePromise.succeed(())
+        let presentedKey = String(openSSHPublicKey: hostKey)
+
+        Task {
+            do {
+                let result = try await trustStore.validate(host: host, port: port, presentedKey: presentedKey)
+                validationCompletePromise.futureResult.eventLoop.execute {
+                    switch result {
+                    case .trusted:
+                        validationCompletePromise.succeed(())
+                    case .mismatch(let expected, let presented):
+                        validationCompletePromise.fail(
+                            SSHTransportError.hostKeyMismatch(
+                                host: self.host,
+                                port: self.port,
+                                expectedFingerprint: Self.fingerprint(forOpenSSHKey: expected),
+                                presentedFingerprint: Self.fingerprint(forOpenSSHKey: presented)
+                            )
+                        )
+                    }
+                }
+            } catch {
+                validationCompletePromise.futureResult.eventLoop.execute {
+                    validationCompletePromise.fail(
+                        SSHTransportError.hostKeyTrustStoreFailed(error.localizedDescription)
+                    )
+                }
+            }
+        }
+    }
+
+    private static func fingerprint(forOpenSSHKey openSSHKey: String) -> String {
+        let parts = openSSHKey.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: true)
+        guard parts.count >= 2,
+              let keyData = Data(base64Encoded: String(parts[1])) else {
+            return "unknown"
+        }
+
+        let digest = SHA256.hash(data: keyData)
+        return Data(digest).base64EncodedString()
     }
 }
 
-extension AcceptAllHostKeysDelegate: @unchecked Sendable {}
+extension TOFUHostKeysDelegate: @unchecked Sendable {}

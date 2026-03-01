@@ -29,7 +29,7 @@ enum MoshBootstrap {
             SSHPublicKeyDelegate(username: config.username, privateKey: key)
         }
         nonisolated(unsafe) let authDelegateRef = authDelegate
-        let serverAuthDelegate = AcceptAllHostKeysDelegate()
+        let serverAuthDelegate = TOFUHostKeysDelegate(host: config.host, port: config.port)
 
         let bootstrap = ClientBootstrap(group: group)
             .channelInitializer { channel in
@@ -218,7 +218,7 @@ enum MoshBootstrap {
                     SSHPublicKeyDelegate(username: config.username, privateKey: key)
                 }
                 nonisolated(unsafe) let authDelegateRef = authDelegate
-                let serverAuthDelegate = AcceptAllHostKeysDelegate()
+                let serverAuthDelegate = TOFUHostKeysDelegate(host: config.host, port: config.port)
 
                 let bootstrap = ClientBootstrap(group: group)
                     .channelInitializer { channel in

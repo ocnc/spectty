@@ -23,6 +23,8 @@ public enum SSHTransportError: Error, LocalizedError {
     case notConnected
     case alreadyConnected
     case authenticationFailed
+    case hostKeyMismatch(host: String, port: Int, expectedFingerprint: String, presentedFingerprint: String)
+    case hostKeyTrustStoreFailed(String)
     case channelCreationFailed
     case connectionClosed
     case connectionFailed(String)
@@ -32,6 +34,10 @@ public enum SSHTransportError: Error, LocalizedError {
         case .notConnected: return "SSH transport is not connected"
         case .alreadyConnected: return "SSH transport is already connected"
         case .authenticationFailed: return "SSH authentication failed — check your credentials"
+        case .hostKeyMismatch(let host, let port, let expectedFingerprint, let presentedFingerprint):
+            return "SSH host key mismatch for \(host):\(port) (expected SHA256:\(expectedFingerprint), got SHA256:\(presentedFingerprint))"
+        case .hostKeyTrustStoreFailed(let detail):
+            return "SSH host key verification failed: \(detail)"
         case .channelCreationFailed: return "Failed to create SSH channel"
         case .connectionClosed: return "SSH connection was closed"
         case .connectionFailed(let detail): return "SSH connection failed: \(detail)"
@@ -113,7 +119,7 @@ public final class SSHTransport: TerminalTransport, @unchecked Sendable {
         stateContinuation.yield(.connecting)
 
         nonisolated(unsafe) let authDelegate = makeAuthDelegate()
-        let serverAuthDelegate = AcceptAllHostKeysDelegate()
+        let serverAuthDelegate = TOFUHostKeysDelegate(host: config.host, port: config.port)
 
         // Build the NIO client bootstrap with the SSH handler.
         let bootstrap = ClientBootstrap(group: eventLoopGroup)
@@ -325,4 +331,3 @@ public final class SSHTransport: TerminalTransport, @unchecked Sendable {
         try await shellPromise.futureResult.get()
     }
 }
-
