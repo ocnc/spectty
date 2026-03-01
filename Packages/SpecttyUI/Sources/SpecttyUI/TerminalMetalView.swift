@@ -198,6 +198,23 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
         if _inputAccessory.shiftActive { modifiers.insert(.shift) }
         let hasModifiers = !modifiers.isEmpty
 
+        // QuickPath/swipe often commits whole words at once.
+        // Send plain text as a single key event to preserve order.
+        if !modifiers.contains(.control), !text.contains("\n") {
+            let event = KeyEvent(
+                keyCode: 0,
+                modifiers: modifiers,
+                isKeyDown: true,
+                characters: text
+            )
+            onKeyInput?(event)
+
+            if hasModifiers {
+                _inputAccessory.deactivateModifiers()
+            }
+            return
+        }
+
         for char in text {
             let characters: String
             if char == "\n" {
@@ -511,5 +528,4 @@ extension TerminalMetalView: MTKViewDelegate {
         renderer.render(to: renderPassDescriptor, drawable: drawable)
     }
 }
-
 

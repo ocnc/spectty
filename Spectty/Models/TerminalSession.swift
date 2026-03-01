@@ -22,6 +22,8 @@ final class TerminalSession: Identifiable {
     nonisolated(unsafe) private var stateTask: Task<Void, Never>?
     @ObservationIgnored
     nonisolated(unsafe) private var autoReconnectTask: Task<Void, Never>?
+    @ObservationIgnored
+    private var outboundSendTail: Task<Void, Never>?
 
     init(id: UUID = UUID(), connectionName: String, transport: any TerminalTransport, transportFactory: (@Sendable () -> any TerminalTransport)? = nil, startupCommand: String? = nil, columns: Int = 80, rows: Int = 24, scrollbackCapacity: Int = 10_000) {
         self.id = id
@@ -32,11 +34,11 @@ final class TerminalSession: Identifiable {
         self.startupCommand = startupCommand
 
         // Wire terminal responses (DSR, DA) back through the transport.
-        // Capture transport directly — avoids accessing @MainActor self
-        // from a non-isolated closure, which would trigger unsafeForcedSync.
-        let transport = self.transport
-        self.emulator.onResponse = { data in
-            Task { try? await transport.send(data) }
+        // Route through the same outbound queue to preserve ordering.
+        self.emulator.onResponse = { [weak self] data in
+            Task { @MainActor [weak self] in
+                self?.enqueueOutboundSend(data)
+            }
         }
     }
 
@@ -83,17 +85,12 @@ final class TerminalSession: Identifiable {
     /// Send encoded key data to the transport.
     func sendKey(_ event: KeyEvent) {
         let data = emulator.encodeKey(event)
-        guard !data.isEmpty else { return }
-        Task {
-            try? await transport.send(data)
-        }
+        enqueueOutboundSend(data)
     }
 
     /// Send raw data to the transport (for paste, mouse events, etc.).
     func sendData(_ data: Data) {
-        Task {
-            try? await transport.send(data)
-        }
+        enqueueOutboundSend(data)
     }
 
     /// Resize the terminal and notify the transport.
@@ -134,8 +131,10 @@ final class TerminalSession: Identifiable {
         self.transport = newTransport
 
         // Re-wire emulator response handler
-        self.emulator.onResponse = { data in
-            Task { try? await newTransport.send(data) }
+        self.emulator.onResponse = { [weak self] data in
+            Task { @MainActor [weak self] in
+                self?.enqueueOutboundSend(data)
+            }
         }
 
         // Connect and start streams (same as start())
@@ -193,9 +192,18 @@ final class TerminalSession: Identifiable {
 
     private func sendStartupCommand() {
         guard let cmd = startupCommand, !cmd.isEmpty else { return }
+        enqueueOutboundSend(Data((cmd + "\n").utf8))
+    }
+
+    /// Queue outbound payloads so they are sent in-order, even when the UI
+    /// generates bursts of key events (e.g. swipe typing).
+    private func enqueueOutboundSend(_ data: Data) {
+        guard !data.isEmpty else { return }
         let transport = self.transport
-        Task {
-            try? await transport.send(Data((cmd + "\n").utf8))
+        let previous = outboundSendTail
+        outboundSendTail = Task {
+            _ = await previous?.value
+            try? await transport.send(data)
         }
     }
 
