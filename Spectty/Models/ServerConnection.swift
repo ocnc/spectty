@@ -19,6 +19,38 @@ enum AuthMethod: String, Codable, CaseIterable, Sendable {
     static let visibleCases: [AuthMethod] = [.password, .publicKey]
 }
 
+/// Lightweight Mosh preset for balancing defaults vs advanced behavior.
+enum MoshPreset: String, Codable, CaseIterable, Sendable {
+    case standard = "Standard"
+    case strictNetwork = "Strict Network"
+    case troubleshoot = "Troubleshoot"
+
+    var summary: String {
+        switch self {
+        case .standard:
+            return "Default settings for normal networks."
+        case .strictNetwork:
+            return "Prefers IPv4 and local IP resolution to reduce mixed-stack issues."
+        case .troubleshoot:
+            return "Disables PTY, forces IPv4, and uses remote-reported IP for maximum compatibility."
+        }
+    }
+}
+
+/// Address family to request for mosh-server bind (-i).
+enum MoshBindFamilySetting: String, Codable, CaseIterable, Sendable {
+    case automatic = "Automatic"
+    case ipv4 = "IPv4"
+    case ipv6 = "IPv6"
+}
+
+/// How UDP target IP is selected after bootstrap.
+enum MoshIPResolutionSetting: String, Codable, CaseIterable, Sendable {
+    case `default` = "Default"
+    case local = "Local"
+    case remote = "Remote"
+}
+
 /// Persistent model for a saved server connection.
 @Model
 final class ServerConnection {
@@ -44,6 +76,24 @@ final class ServerConnection {
 
     /// Command to run after connecting (e.g. "tmux new-session -A -s main").
     var startupCommand: String?
+
+    /// Mosh UI preset for applying sensible defaults quickly.
+    var moshPreset: MoshPreset = MoshPreset.standard
+
+    /// Optional override path to `mosh-server` on remote host.
+    var moshServerPath: String?
+
+    /// Optional UDP port or range (e.g. "60001" or "60001:60010").
+    var moshUDPPortRange: String?
+
+    /// Compatibility mode: skips PTY for bootstrap.
+    var moshCompatibilityMode: Bool = false
+
+    /// Requested mosh-server bind address family.
+    var moshBindFamily: MoshBindFamilySetting = MoshBindFamilySetting.automatic
+
+    /// Host IP resolution strategy for UDP target selection.
+    var moshIPResolution: MoshIPResolutionSetting = MoshIPResolutionSetting.default
 
     /// Sort order for the connection list.
     var sortOrder: Int
@@ -74,5 +124,24 @@ final class ServerConnection {
         self.transport = transport
         self.authMethod = authMethod
         self.sortOrder = 0
+    }
+
+    /// Apply a preset and update related advanced Mosh settings.
+    func applyMoshPreset(_ preset: MoshPreset) {
+        moshPreset = preset
+        switch preset {
+        case .standard:
+            moshCompatibilityMode = false
+            moshBindFamily = .automatic
+            moshIPResolution = .default
+        case .strictNetwork:
+            moshCompatibilityMode = false
+            moshBindFamily = .ipv4
+            moshIPResolution = .local
+        case .troubleshoot:
+            moshCompatibilityMode = true
+            moshBindFamily = .ipv4
+            moshIPResolution = .remote
+        }
     }
 }

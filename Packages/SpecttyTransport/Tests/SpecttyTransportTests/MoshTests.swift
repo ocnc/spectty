@@ -283,7 +283,7 @@ struct BootstrapTests {
         mosh-server (mosh 1.4.0) [build mosh 1.4.0]
         """
 
-        let session = try MoshBootstrap.parseMoshConnect(output: output, host: "example.com")
+        let session = try MoshBootstrap.parseMoshConnect(output: output, defaultHost: "example.com")
         #expect(session.host == "example.com")
         #expect(session.udpPort == 60001)
         #expect(session.key == "ABCDEFGHIJKLMNOPQRSTUV")
@@ -293,8 +293,50 @@ struct BootstrapTests {
     func throwsOnMissing() {
         let output = "some random server output\n"
         #expect(throws: MoshError.self) {
-            try MoshBootstrap.parseMoshConnect(output: output, host: "example.com")
+            try MoshBootstrap.parseMoshConnect(output: output, defaultHost: "example.com")
         }
+    }
+
+    @Test("Uses remote-reported IP when enabled")
+    func parsesRemoteReportedHost() throws {
+        let output = """
+
+        MOSH SSH_CONNECTION 198.51.100.22 60123 203.0.113.10 22
+        MOSH CONNECT 60005 ZYXWVUTSRQPONMLKJIHGFE
+
+        """
+        let session = try MoshBootstrap.parseMoshConnect(
+            output: output,
+            defaultHost: "example.com",
+            ipResolution: .remote
+        )
+        #expect(session.host == "203.0.113.10")
+        #expect(session.udpPort == 60005)
+    }
+
+    @Test("Uses locally resolved host when configured")
+    func parsesLocalResolvedHost() throws {
+        let output = "MOSH CONNECT 60005 ZYXWVUTSRQPONMLKJIHGFE"
+        let session = try MoshBootstrap.parseMoshConnect(
+            output: output,
+            defaultHost: "example.com",
+            localResolvedHost: "198.51.100.9",
+            ipResolution: .local
+        )
+        #expect(session.host == "198.51.100.9")
+        #expect(session.udpPort == 60005)
+    }
+
+    @Test("Falls back to default host when remote-reported IP is missing")
+    func remoteFallbacksToDefaultHost() throws {
+        let output = "MOSH CONNECT 60005 ZYXWVUTSRQPONMLKJIHGFE"
+        let session = try MoshBootstrap.parseMoshConnect(
+            output: output,
+            defaultHost: "203.0.113.77",
+            ipResolution: .remote
+        )
+        #expect(session.host == "203.0.113.77")
+        #expect(session.udpPort == 60005)
     }
 }
 

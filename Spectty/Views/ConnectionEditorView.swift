@@ -7,6 +7,7 @@ struct ConnectionEditorView: View {
     let isNew: Bool
     let onSave: (ServerConnection) -> Void
     @Environment(\.dismiss) private var dismiss
+    @State private var showMoshAdvanced = false
 
     @State private var keyValidationError: String?
     @State private var derivedPublicKey: String?
@@ -120,6 +121,52 @@ struct ConnectionEditorView: View {
                     .pickerStyle(.segmented)
                 }
 
+                if connection.transport == .mosh {
+                    Section {
+                        DisclosureGroup("Mosh Advanced", isExpanded: $showMoshAdvanced) {
+                            Picker("Preset", selection: $connection.moshPreset) {
+                                ForEach(MoshPreset.allCases, id: \.self) { preset in
+                                    Text(preset.rawValue).tag(preset)
+                                }
+                            }
+                            .onChange(of: connection.moshPreset, initial: false) { _, newPreset in
+                                connection.applyMoshPreset(newPreset)
+                            }
+
+                            Text(connection.moshPreset.summary)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+
+                            TextField("mosh-server path (optional)", text: moshServerPathBinding)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .font(.system(.body, design: .monospaced))
+
+                            TextField("UDP port or range (optional)", text: moshUDPPortBinding)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .keyboardType(.numbersAndPunctuation)
+                                .font(.system(.body, design: .monospaced))
+
+                            Picker("IP Resolution", selection: $connection.moshIPResolution) {
+                                ForEach(MoshIPResolutionSetting.allCases, id: \.self) { mode in
+                                    Text(mode.rawValue).tag(mode)
+                                }
+                            }
+
+                            Toggle("Compatibility Mode (No SSH PTY)", isOn: $connection.moshCompatibilityMode)
+
+                            Picker("Bind Family", selection: $connection.moshBindFamily) {
+                                ForEach(MoshBindFamilySetting.allCases, id: \.self) { family in
+                                    Text(family.rawValue).tag(family)
+                                }
+                            }
+                        }
+                    } footer: {
+                        Text("Advanced settings for network edge cases and bootstrap troubleshooting.")
+                    }
+                }
+
                 Section {
                     TextField("e.g. tmux new-session -A -s main", text: startupCommandBinding)
                         .textInputAutocapitalization(.never)
@@ -169,6 +216,20 @@ struct ConnectionEditorView: View {
         Binding(
             get: { connection.startupCommand ?? "" },
             set: { connection.startupCommand = $0.isEmpty ? nil : $0 }
+        )
+    }
+
+    private var moshServerPathBinding: Binding<String> {
+        Binding(
+            get: { connection.moshServerPath ?? "" },
+            set: { connection.moshServerPath = $0.isEmpty ? nil : $0 }
+        )
+    }
+
+    private var moshUDPPortBinding: Binding<String> {
+        Binding(
+            get: { connection.moshUDPPortRange ?? "" },
+            set: { connection.moshUDPPortRange = $0.isEmpty ? nil : $0 }
         )
     }
 

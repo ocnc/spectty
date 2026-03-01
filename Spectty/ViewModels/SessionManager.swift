@@ -87,6 +87,7 @@ final class SessionManager {
             username: connection.username,
             authMethod: authMethod
         )
+        let moshOptions = moshBootstrapOptions(for: connection)
 
         let transport: any TerminalTransport
 
@@ -94,7 +95,7 @@ final class SessionManager {
         case .ssh:
             transport = SSHTransport(config: config)
         case .mosh:
-            transport = MoshTransport(config: config)
+            transport = MoshTransport(config: config, bootstrapOptions: moshOptions)
         }
 
         let scrollbackLines = UserDefaults.standard.integer(forKey: "scrollbackLines")
@@ -104,7 +105,7 @@ final class SessionManager {
             case .ssh:
                 return SSHTransport(config: config)
             case .mosh:
-                return MoshTransport(config: config)
+                return MoshTransport(config: config, bootstrapOptions: moshOptions)
             }
         }
         let session = TerminalSession(
@@ -294,5 +295,39 @@ final class SessionManager {
                 try? await sessionStore.save(state)
             }
         }
+    }
+
+    private func moshBootstrapOptions(for connection: ServerConnection) -> MoshBootstrapOptions {
+        let bindFamily: MoshBindFamily = switch connection.moshBindFamily {
+        case .automatic:
+            .automatic
+        case .ipv4:
+            .ipv4
+        case .ipv6:
+            .ipv6
+        }
+
+        let ipResolution: MoshIPResolution = switch connection.moshIPResolution {
+        case .default:
+            .default
+        case .local:
+            .local
+        case .remote:
+            .remote
+        }
+
+        return MoshBootstrapOptions(
+            serverPath: normalizedOptional(connection.moshServerPath),
+            udpPortRange: normalizedOptional(connection.moshUDPPortRange),
+            allocatePTY: !connection.moshCompatibilityMode,
+            bindFamily: bindFamily,
+            ipResolution: ipResolution
+        )
+    }
+
+    private func normalizedOptional(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
