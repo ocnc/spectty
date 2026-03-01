@@ -31,7 +31,7 @@ public enum SSHTransportError: Error, LocalizedError {
         switch self {
         case .notConnected: return "SSH transport is not connected"
         case .alreadyConnected: return "SSH transport is already connected"
-        case .authenticationFailed: return "SSH authentication failed — check username and password"
+        case .authenticationFailed: return "SSH authentication failed — check your credentials"
         case .channelCreationFailed: return "Failed to create SSH channel"
         case .connectionClosed: return "SSH connection was closed"
         case .connectionFailed(let detail): return "SSH connection failed: \(detail)"

@@ -207,6 +207,10 @@ public final class MoshTransport: ResumableTransport, @unchecked Sendable {
             return nil
         }
         let sspState = ssp.exportState()
+        let authType: SSHAuthMethodType? = switch config.authMethod {
+        case .password: nil
+        case .publicKey: .publicKey
+        }
         return MoshSessionState(
             sessionID: sessionID,
             connectionID: connectionID,
@@ -220,6 +224,7 @@ public final class MoshTransport: ResumableTransport, @unchecked Sendable {
             sshHost: config.host,
             sshPort: config.port,
             sshUsername: config.username,
+            authMethodType: authType,
             savedAt: Date()
         )
     }

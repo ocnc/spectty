@@ -11,6 +11,12 @@ public struct GeneratedKeyPair: Sendable {
     public let publicKeyData: Data
     /// The SSH key type that was generated.
     public let keyType: GeneratedKeyType
+
+    public init(privateKeyData: Data, publicKeyData: Data, keyType: GeneratedKeyType) {
+        self.privateKeyData = privateKeyData
+        self.publicKeyData = publicKeyData
+        self.keyType = keyType
+    }
 }
 
 /// The algorithm used when generating a key pair.
@@ -18,6 +24,7 @@ public enum GeneratedKeyType: String, Sendable {
     case ed25519
     case ecdsaP256
     case secureEnclaveP256
+    case ecdsaP384
 }
 
 // MARK: - KeyGenerator
@@ -105,6 +112,10 @@ public struct KeyGenerator: Sendable {
         case .ecdsaP256, .secureEnclaveP256:
             algorithmName = "ecdsa-sha2-nistp256"
             blob = Self.buildECDSAP256Blob(publicKey: keyPair.publicKeyData)
+
+        case .ecdsaP384:
+            algorithmName = "ecdsa-sha2-nistp384"
+            blob = Self.buildECDSAP384Blob(publicKey: keyPair.publicKeyData)
         }
 
         let base64 = blob.base64EncodedString()
@@ -124,6 +135,17 @@ public struct KeyGenerator: Sendable {
         var blob = Data()
         let keyType = "ssh-ed25519"
         blob.appendSSHString(keyType)
+        blob.appendSSHBytes(publicKey)
+        return blob
+    }
+
+    /// Build the SSH wire-format blob for an ECDSA P-384 public key.
+    ///
+    /// Layout: `string "ecdsa-sha2-nistp384"` || `string "nistp384"` || `string <EC point>`
+    private static func buildECDSAP384Blob(publicKey: Data) -> Data {
+        var blob = Data()
+        blob.appendSSHString("ecdsa-sha2-nistp384")
+        blob.appendSSHString("nistp384")
         blob.appendSSHBytes(publicKey)
         return blob
     }
