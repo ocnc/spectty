@@ -2,6 +2,12 @@ import Foundation
 import NIOCore
 import NIOSSH
 
+/// Lightweight tag identifying the SSH auth method (for serialisation).
+public enum SSHAuthMethodType: String, Codable, Sendable {
+    case password
+    case publicKey
+}
+
 /// SSH authentication method offered by the client.
 public enum SSHAuthMethod: Sendable {
     case password(String)

@@ -12,6 +12,11 @@ enum AuthMethod: String, Codable, CaseIterable, Sendable {
     case password = "Password"
     case publicKey = "Public Key"
     case keyboardInteractive = "Keyboard Interactive"
+
+    /// Cases shown in the connection editor picker.
+    /// `keyboardInteractive` is kept for SwiftData backwards compatibility
+    /// but not offered in the UI (it behaves identically to `.password`).
+    static let visibleCases: [AuthMethod] = [.password, .publicKey]
 }
 
 /// Persistent model for a saved server connection.

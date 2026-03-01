@@ -62,8 +62,8 @@ final class SessionManager {
             transport = MoshTransport(config: config)
         }
 
-        let transportType = connection.transport
         let scrollbackLines = UserDefaults.standard.integer(forKey: "scrollbackLines")
+        let transportType = connection.transport
         let transportFactory: @Sendable () -> any TerminalTransport = {
             switch transportType {
             case .ssh:
@@ -157,7 +157,7 @@ final class SessionManager {
     func resume(_ savedState: MoshSessionState) async throws -> TerminalSession {
         let authMethod: SSHAuthMethod
 
-        if savedState.authMethodType == "publicKey" {
+        if savedState.authMethodType == .publicKey {
             let account = "private-key-\(savedState.connectionID)"
             if let pemData = try? await keychain.load(account: account),
                let pemString = String(data: pemData, encoding: .utf8),

@@ -207,9 +207,9 @@ public final class MoshTransport: ResumableTransport, @unchecked Sendable {
             return nil
         }
         let sspState = ssp.exportState()
-        let authType: String? = switch config.authMethod {
+        let authType: SSHAuthMethodType? = switch config.authMethod {
         case .password: nil
-        case .publicKey: "publicKey"
+        case .publicKey: .publicKey
         }
         return MoshSessionState(
             sessionID: sessionID,

@@ -36,7 +36,7 @@ struct ConnectionEditorView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                     Picker("Method", selection: $connection.authMethod) {
-                        ForEach(AuthMethod.allCases, id: \.self) { method in
+                        ForEach(AuthMethod.visibleCases, id: \.self) { method in
                             Text(method.rawValue).tag(method)
                         }
                     }
@@ -167,54 +167,34 @@ struct ConnectionEditorView: View {
         do {
             let parsed = try SSHKeyImporter.importKey(from: pem)
 
-            // Check for RSA (not supported by NIOSSH)
-            if parsed.keyType == .rsa {
+            // Trial CryptoKit construction — surface encoding errors at edit time,
+            // not at connection time — and resolve the GeneratedKeyType in one pass.
+            let generatedKeyType: GeneratedKeyType
+            switch parsed.keyType {
+            case .ed25519:
+                _ = try Curve25519.Signing.PrivateKey(rawRepresentation: parsed.privateKeyData)
+                generatedKeyType = .ed25519
+            case .ecdsaP256:
+                _ = try P256.Signing.PrivateKey(rawRepresentation: parsed.privateKeyData)
+                generatedKeyType = .ecdsaP256
+            case .ecdsaP384:
+                _ = try P384.Signing.PrivateKey(rawRepresentation: parsed.privateKeyData)
+                generatedKeyType = .ecdsaP384
+            case .rsa:
+                // Unreachable: SSHKeyImporter.importKey already throws .rsaNotSupported
                 keyValidationError = "RSA keys are not supported. Use Ed25519 or ECDSA."
                 derivedPublicKey = nil
                 return
             }
 
-            // Trial CryptoKit construction — surface encoding errors at edit time,
-            // not at connection time.
-            switch parsed.keyType {
-            case .ed25519:
-                _ = try Curve25519.Signing.PrivateKey(rawRepresentation: parsed.privateKeyData)
-            case .ecdsaP256:
-                _ = try P256.Signing.PrivateKey(rawRepresentation: parsed.privateKeyData)
-            case .ecdsaP384:
-                _ = try P384.Signing.PrivateKey(rawRepresentation: parsed.privateKeyData)
-            case .rsa:
-                break // Already rejected above
-            }
-
             keyValidationError = nil
 
-            // Derive OpenSSH public key for display
-            switch parsed.keyType {
-            case .ed25519:
-                let keyPair = GeneratedKeyPair(
-                    privateKeyData: parsed.privateKeyData,
-                    publicKeyData: parsed.publicKeyData,
-                    keyType: .ed25519
-                )
-                derivedPublicKey = KeyGenerator.openSSHPublicKey(for: keyPair)
-            case .ecdsaP256:
-                let keyPair = GeneratedKeyPair(
-                    privateKeyData: parsed.privateKeyData,
-                    publicKeyData: parsed.publicKeyData,
-                    keyType: .ecdsaP256
-                )
-                derivedPublicKey = KeyGenerator.openSSHPublicKey(for: keyPair)
-            case .ecdsaP384:
-                let keyPair = GeneratedKeyPair(
-                    privateKeyData: parsed.privateKeyData,
-                    publicKeyData: parsed.publicKeyData,
-                    keyType: .ecdsaP384
-                )
-                derivedPublicKey = KeyGenerator.openSSHPublicKey(for: keyPair)
-            case .rsa:
-                break // Already handled above
-            }
+            let keyPair = GeneratedKeyPair(
+                privateKeyData: parsed.privateKeyData,
+                publicKeyData: parsed.publicKeyData,
+                keyType: generatedKeyType
+            )
+            derivedPublicKey = KeyGenerator.openSSHPublicKey(for: keyPair)
         } catch let error as SSHKeyImportError {
             derivedPublicKey = nil
             switch error {
