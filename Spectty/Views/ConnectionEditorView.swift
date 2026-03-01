@@ -124,13 +124,10 @@ struct ConnectionEditorView: View {
                 if connection.transport == .mosh {
                     Section {
                         DisclosureGroup("Mosh Advanced", isExpanded: $showMoshAdvanced) {
-                            Picker("Preset", selection: $connection.moshPreset) {
+                            Picker("Preset", selection: moshPresetBinding) {
                                 ForEach(MoshPreset.allCases, id: \.self) { preset in
                                     Text(preset.rawValue).tag(preset)
                                 }
-                            }
-                            .onChange(of: connection.moshPreset, initial: false) { _, newPreset in
-                                connection.applyMoshPreset(newPreset)
                             }
 
                             Text(connection.moshPreset.summary)
@@ -230,6 +227,13 @@ struct ConnectionEditorView: View {
         Binding(
             get: { connection.moshUDPPortRange ?? "" },
             set: { connection.moshUDPPortRange = $0.isEmpty ? nil : $0 }
+        )
+    }
+
+    private var moshPresetBinding: Binding<MoshPreset> {
+        Binding(
+            get: { connection.moshPreset },
+            set: { connection.applyMoshPreset($0) }
         )
     }
 

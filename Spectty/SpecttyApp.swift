@@ -8,10 +8,15 @@ struct SpecttyApp: App {
     @Environment(\.scenePhase) private var scenePhase
 
     var sharedModelContainer: ModelContainer = {
-        let schema = Schema([ServerConnection.self])
-        let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+        let isRunningTests = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        let schema = Schema(versionedSchema: SpecttySchemaV4.self)
+        let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: isRunningTests)
         do {
-            return try ModelContainer(for: schema, configurations: [config])
+            return try ModelContainer(
+                for: schema,
+                migrationPlan: SpecttyMigrationPlan.self,
+                configurations: [config]
+            )
         } catch {
             fatalError("Could not create ModelContainer: \(error)")
         }
