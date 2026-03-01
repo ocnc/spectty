@@ -10,6 +10,7 @@ struct ConnectionEditorView: View {
 
     @State private var keyValidationError: String?
     @State private var derivedPublicKey: String?
+    @State private var hasExistingKey = false
 
     var body: some View {
         NavigationStack {
@@ -48,49 +49,63 @@ struct ConnectionEditorView: View {
                     }
 
                     if connection.authMethod == .publicKey {
-                        TextEditor(text: $connection.privateKeyPEM)
-                            .font(.system(.caption, design: .monospaced))
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.never)
-                            .frame(minHeight: 120)
-                            .overlay(alignment: .topLeading) {
-                                if connection.privateKeyPEM.isEmpty {
-                                    Text("Paste private key (PEM format)")
-                                        .font(.system(.caption, design: .monospaced))
-                                        .foregroundStyle(.tertiary)
-                                        .padding(.top, 8)
-                                        .padding(.leading, 4)
-                                        .allowsHitTesting(false)
+                        if hasExistingKey && connection.privateKeyPEM.isEmpty {
+                            // Key is in Keychain — don't expose it, just show status.
+                            HStack {
+                                Label("Private key stored", systemImage: "key.fill")
+                                    .font(.body)
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Button("Replace") {
+                                    hasExistingKey = false
                                 }
-                            }
-                            .onChange(of: connection.privateKeyPEM) {
-                                validatePrivateKey()
-                            }
-
-                        if let error = keyValidationError {
-                            Label(error, systemImage: "exclamationmark.triangle")
                                 .font(.caption)
-                                .foregroundStyle(.red)
-                        }
-
-                        if let pubKey = derivedPublicKey {
-                            VStack(alignment: .leading, spacing: 6) {
-                                HStack {
-                                    Text("Public Key")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                    Spacer()
-                                    Button {
-                                        UIPasteboard.general.string = pubKey
-                                    } label: {
-                                        Label("Copy", systemImage: "doc.on.doc")
-                                            .font(.caption)
+                            }
+                        } else {
+                            TextEditor(text: $connection.privateKeyPEM)
+                                .font(.system(.caption, design: .monospaced))
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+                                .frame(minHeight: 120)
+                                .overlay(alignment: .topLeading) {
+                                    if connection.privateKeyPEM.isEmpty {
+                                        Text("Paste private key (PEM format)")
+                                            .font(.system(.caption, design: .monospaced))
+                                            .foregroundStyle(.tertiary)
+                                            .padding(.top, 8)
+                                            .padding(.leading, 4)
+                                            .allowsHitTesting(false)
                                     }
                                 }
-                                Text(pubKey)
-                                    .font(.system(.caption2, design: .monospaced))
-                                    .foregroundStyle(.secondary)
-                                    .textSelection(.enabled)
+                                .onChange(of: connection.privateKeyPEM) {
+                                    validatePrivateKey()
+                                }
+
+                            if let error = keyValidationError {
+                                Label(error, systemImage: "exclamationmark.triangle")
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
+                            }
+
+                            if let pubKey = derivedPublicKey {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    HStack {
+                                        Text("Public Key")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        Spacer()
+                                        Button {
+                                            UIPasteboard.general.string = pubKey
+                                        } label: {
+                                            Label("Copy", systemImage: "doc.on.doc")
+                                                .font(.caption)
+                                        }
+                                    }
+                                    Text(pubKey)
+                                        .font(.system(.caption2, design: .monospaced))
+                                        .foregroundStyle(.secondary)
+                                        .textSelection(.enabled)
+                                }
                             }
                         }
                     }
@@ -144,7 +159,8 @@ struct ConnectionEditorView: View {
     private var isSaveEnabled: Bool {
         guard !connection.host.isEmpty, !connection.username.isEmpty else { return false }
         if connection.authMethod == .publicKey {
-            return !connection.privateKeyPEM.isEmpty && keyValidationError == nil && derivedPublicKey != nil
+            // Allow save if a key is already in Keychain or a new valid key was pasted.
+            return hasExistingKey || (!connection.privateKeyPEM.isEmpty && keyValidationError == nil && derivedPublicKey != nil)
         }
         return true
     }
@@ -223,15 +239,8 @@ struct ConnectionEditorView: View {
         guard !isNew,
               connection.authMethod == .publicKey,
               connection.privateKeyKeychainAccount != nil else { return }
-        let account = "private-key-\(connection.id.uuidString)"
-        Task {
-            let keychain = KeychainManager()
-            if let data = try? await keychain.load(account: account),
-               let pem = String(data: data, encoding: .utf8) {
-                connection.privateKeyPEM = pem
-                validatePrivateKey()
-            }
-        }
+        hasExistingKey = true
+        connection.privateKeyPEM = ""
     }
 
     private func saveCredentialsToKeychain() async {
