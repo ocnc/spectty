@@ -22,6 +22,11 @@ public final class VTStateMachine: @unchecked Sendable {
         case dcsPassthrough
     }
 
+    private enum DesignatedCharset {
+        case ascii
+        case decSpecialGraphics
+    }
+
     private var parserState: ParserState = .ground
     private var params: [UInt16] = []
     private var currentParam: UInt16 = 0
@@ -29,10 +34,19 @@ public final class VTStateMachine: @unchecked Sendable {
     private var intermediateChar: Character = "\0"
     private var oscPayload: [UInt8] = []
     private var utf8Buffer: [UInt8] = []
+    private var g0Charset: DesignatedCharset = .ascii
+    private var g1Charset: DesignatedCharset = .ascii
+    private var useG1Charset = false
 
     /// Called when the terminal needs to send a response back to the host
     /// (e.g., cursor position report, device attributes).
     public var onResponse: ((Data) -> Void)?
+
+    /// Called when remote requests clipboard update via OSC 52.
+    public var onSetClipboard: ((String) -> Void)?
+
+    /// Called when remote queries clipboard content via OSC 52.
+    public var onGetClipboard: (() -> String?)?
 
     public init(state: TerminalState) {
         self.terminalState = state
@@ -119,7 +133,7 @@ public final class VTStateMachine: @unchecked Sendable {
         case 0x0D:
             executeC0(byte)
         case 0x20...0x7E:
-            printChar(Character(UnicodeScalar(byte)))
+            printASCIIByte(byte)
         case 0x7F:
             break // DEL — ignore
         case 0xC0...0xDF:
@@ -196,7 +210,7 @@ public final class VTStateMachine: @unchecked Sendable {
         case 0x20...0x2F:
             intermediateChar = Character(UnicodeScalar(byte))
         case 0x30...0x7E:
-            // Dispatch escape sequence with intermediate.
+            designateCharset(intermediate: intermediateChar, final: byte)
             parserState = .ground
         default:
             parserState = .ground
@@ -359,15 +373,59 @@ public final class VTStateMachine: @unchecked Sendable {
         case 0x0D: // CR
             screen.cursor.col = 0
         case 0x0E: // SO (Shift Out)
-            break // G1 character set — not implemented
+            useG1Charset = true
         case 0x0F: // SI (Shift In)
-            break // G0 character set — not implemented
+            useG1Charset = false
         default:
             break
         }
     }
 
     // MARK: - Printing
+
+    private func printASCIIByte(_ byte: UInt8) {
+        let character = mappedASCIICharacter(byte, charset: useG1Charset ? g1Charset : g0Charset)
+        printChar(character)
+    }
+
+    private func mappedASCIICharacter(_ byte: UInt8, charset: DesignatedCharset) -> Character {
+        guard charset == .decSpecialGraphics else {
+            return Character(UnicodeScalar(byte))
+        }
+
+        if let mapped = Self.decSpecialGraphicsMap[byte] {
+            return mapped
+        }
+        return Character(UnicodeScalar(byte))
+    }
+
+    private static let decSpecialGraphicsMap: [UInt8: Character] = [
+        0x60: "◆",
+        0x61: "▒",
+        0x66: "°",
+        0x67: "±",
+        0x6A: "┘",
+        0x6B: "┐",
+        0x6C: "┌",
+        0x6D: "└",
+        0x6E: "┼",
+        0x6F: "⎺",
+        0x70: "⎻",
+        0x71: "─",
+        0x72: "⎼",
+        0x73: "⎽",
+        0x74: "├",
+        0x75: "┤",
+        0x76: "┴",
+        0x77: "┬",
+        0x78: "│",
+        0x79: "≤",
+        0x7A: "≥",
+        0x7B: "π",
+        0x7C: "≠",
+        0x7D: "£",
+        0x7E: "·",
+    ]
 
     private func printChar(_ char: Character) {
         let s = screen
@@ -483,6 +541,28 @@ public final class VTStateMachine: @unchecked Sendable {
         terminalState.activeScreen = terminalState.primaryScreen
         terminalState.modes = [.autoWrap, .cursorVisible]
         terminalState.scrollback.clear()
+        g0Charset = .ascii
+        g1Charset = .ascii
+        useG1Charset = false
+    }
+
+    private func designateCharset(intermediate: Character, final: UInt8) {
+        let target: DesignatedCharset
+        switch final {
+        case 0x30: // '0' — DEC Special Graphics
+            target = .decSpecialGraphics
+        default:
+            target = .ascii
+        }
+
+        switch intermediate {
+        case "(":
+            g0Charset = target
+        case ")":
+            g1Charset = target
+        default:
+            break
+        }
     }
 
     // MARK: - CSI Dispatch
@@ -994,8 +1074,7 @@ public final class VTStateMachine: @unchecked Sendable {
         case 1: // Set icon name — treat as title
             screen.title = data
         case 52: // Clipboard
-            // TODO: Handle clipboard access
-            break
+            handleOSC52(data)
         case 4: // Change/query color palette entry
             break
         case 10: // Set foreground color
@@ -1007,6 +1086,28 @@ public final class VTStateMachine: @unchecked Sendable {
         default:
             break
         }
+    }
+
+    private func handleOSC52(_ data: String) {
+        let components = data.split(separator: ";", maxSplits: 1, omittingEmptySubsequences: false)
+        guard components.count == 2 else { return }
+
+        let selection = String(components[0])
+        let payload = String(components[1])
+
+        if payload == "?" {
+            guard let content = onGetClipboard?() else { return }
+            let encoded = Data(content.utf8).base64EncodedString()
+            let response = Data("\u{1B}]52;\(selection);\(encoded)\u{07}".utf8)
+            onResponse?(response)
+            return
+        }
+
+        guard let decoded = Data(base64Encoded: payload, options: [.ignoreUnknownCharacters]) else {
+            return
+        }
+        let text = String(decoding: decoded, as: UTF8.self)
+        onSetClipboard?(text)
     }
 
     // MARK: - UTF-8 Decoding

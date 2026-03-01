@@ -14,6 +14,18 @@ public final class GhosttyTerminalEmulator: TerminalEmulator, @unchecked Sendabl
         set { vtStateMachine.onResponse = newValue }
     }
 
+    /// Called when remote sends clipboard data (OSC 52 set).
+    public var onSetClipboard: ((String) -> Void)? {
+        get { vtStateMachine.onSetClipboard }
+        set { vtStateMachine.onSetClipboard = newValue }
+    }
+
+    /// Called when remote queries local clipboard (OSC 52 query).
+    public var onGetClipboard: (() -> String?)? {
+        get { vtStateMachine.onGetClipboard }
+        set { vtStateMachine.onGetClipboard = newValue }
+    }
+
     public init(columns: Int = 80, rows: Int = 24, scrollbackCapacity: Int = 10_000) {
         self.state = TerminalState(columns: columns, rows: rows, scrollbackCapacity: scrollbackCapacity)
         self.vtStateMachine = VTStateMachine(state: self.state)
