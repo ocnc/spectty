@@ -317,17 +317,11 @@ final class SessionManager {
         }
 
         return MoshBootstrapOptions(
-            serverPath: normalizedOptional(connection.moshServerPath),
-            udpPortRange: normalizedOptional(connection.moshUDPPortRange),
+            serverPath: connection.moshServerPath,
+            udpPortRange: connection.moshUDPPortRange,
             allocatePTY: !connection.moshCompatibilityMode,
             bindFamily: bindFamily,
             ipResolution: ipResolution
         )
-    }
-
-    private func normalizedOptional(_ value: String?) -> String? {
-        guard let value else { return nil }
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
     }
 }
