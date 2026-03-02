@@ -37,6 +37,44 @@ final class ServerConnectionMigrationSmokeTests: XCTestCase {
         XCTAssertEqual(connection.moshIPResolution, .default)
     }
 
+    func testV2StoreMigratesToLatestSchema() throws {
+        let storeURL = try makeStoreURL(testName: #function)
+
+        let v2Schema = Schema(versionedSchema: SpecttySchemaV2.self)
+        let v2Config = ModelConfiguration(schema: v2Schema, url: storeURL)
+        let v2Container = try ModelContainer(for: v2Schema, configurations: [v2Config])
+        let v2Context = ModelContext(v2Container)
+
+        let v2Connection = SpecttySchemaV2.ServerConnection(
+            name: "V2Connection",
+            host: "v2.example.com",
+            port: 22,
+            username: "v2user",
+            transport: .mosh,
+            authMethod: .password
+        )
+        v2Connection.moshPreset = .strictNetwork
+        v2Connection.moshCompatibilityMode = false
+        v2Connection.moshBindFamily = .ipv4
+        v2Connection.moshIPResolution = .local
+        v2Context.insert(v2Connection)
+        try v2Context.save()
+
+        let migratedContainer = try makeLatestContainer(storeURL: storeURL)
+        let migratedContext = ModelContext(migratedContainer)
+        let fetched = try migratedContext.fetch(FetchDescriptor<ServerConnection>())
+
+        XCTAssertEqual(fetched.count, 1)
+        let connection = try XCTUnwrap(fetched.first)
+        XCTAssertEqual(connection.name, "V2Connection")
+        XCTAssertEqual(connection.host, "v2.example.com")
+        XCTAssertEqual(connection.username, "v2user")
+        XCTAssertEqual(connection.moshPreset, .strictNetwork)
+        XCTAssertEqual(connection.moshCompatibilityMode, false)
+        XCTAssertEqual(connection.moshBindFamily, .ipv4)
+        XCTAssertEqual(connection.moshIPResolution, .local)
+    }
+
     func testV3NilMoshFieldsAreBackfilledDuringMigration() throws {
         let storeURL = try makeStoreURL(testName: #function)
 

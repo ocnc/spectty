@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import SwiftData
 
 /// Manages persistence of server connections using SwiftData.
@@ -6,6 +7,7 @@ import SwiftData
 @MainActor
 final class ConnectionStore {
     private let modelContext: ModelContext
+    private let logger = Logger(subsystem: "com.oceancheung.spectty-terminal", category: "ConnectionStore")
 
     var connections: [ServerConnection] = []
 
@@ -58,6 +60,6 @@ final class ConnectionStore {
     }
 
     private func logPersistenceError(_ message: String) {
-        print("ConnectionStore: \(message)")
+        logger.error("\(message)")
     }
 }

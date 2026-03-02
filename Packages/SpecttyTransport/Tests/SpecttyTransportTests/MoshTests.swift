@@ -338,6 +338,45 @@ struct BootstrapTests {
         #expect(session.host == "203.0.113.77")
         #expect(session.udpPort == 60005)
     }
+
+    @Test("buildServerCommand quotes custom server path safely")
+    func buildServerCommandQuotesCustomPath() {
+        let config = SSHConnectionConfig(
+            host: "example.com",
+            username: "user",
+            authMethod: .password("pw")
+        )
+        let options = MoshBootstrapOptions(serverPath: "/opt/custom path/mosh-server")
+
+        let command = MoshBootstrap.buildServerCommand(config: config, options: options)
+        #expect(command.contains("exec '/opt/custom path/mosh-server' new -i 0.0.0.0"))
+    }
+
+    @Test("buildServerCommand includes sanitized UDP port range")
+    func buildServerCommandIncludesValidPortRange() {
+        let config = SSHConnectionConfig(
+            host: "example.com",
+            username: "user",
+            authMethod: .password("pw")
+        )
+        let options = MoshBootstrapOptions(udpPortRange: "60001:60010")
+
+        let command = MoshBootstrap.buildServerCommand(config: config, options: options)
+        #expect(command.contains("-p 60001:60010"))
+    }
+
+    @Test("buildServerCommand drops invalid UDP port range")
+    func buildServerCommandDropsInvalidPortRange() {
+        let config = SSHConnectionConfig(
+            host: "example.com",
+            username: "user",
+            authMethod: .password("pw")
+        )
+        let options = MoshBootstrapOptions(udpPortRange: "60001;rm -rf /")
+
+        let command = MoshBootstrap.buildServerCommand(config: config, options: options)
+        #expect(!command.contains("-p "))
+    }
 }
 
 // MARK: - Fragment Framing Tests
