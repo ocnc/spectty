@@ -37,6 +37,7 @@ public final class MoshTransport: ResumableTransport, @unchecked Sendable {
     public let incomingData: AsyncStream<Data>
 
     private let config: SSHConnectionConfig
+    private let bootstrapOptions: MoshBootstrapOptions
     private let stateContinuation: AsyncStream<TransportState>.Continuation
     private let dataContinuation: AsyncStream<Data>.Continuation
 
@@ -52,8 +53,9 @@ public final class MoshTransport: ResumableTransport, @unchecked Sendable {
     /// NAT type detected during pre-flight STUN check. Available after `connect()`.
     public nonisolated(unsafe) private(set) var detectedNATType: STUNClient.NATType?
 
-    public init(config: SSHConnectionConfig) {
+    public init(config: SSHConnectionConfig, bootstrapOptions: MoshBootstrapOptions = .init()) {
         self.config = config
+        self.bootstrapOptions = bootstrapOptions
 
         var sc: AsyncStream<TransportState>.Continuation!
         self.state = AsyncStream { sc = $0 }
@@ -65,8 +67,13 @@ public final class MoshTransport: ResumableTransport, @unchecked Sendable {
     }
 
     /// Create a transport for resuming a saved session (skips SSH bootstrap).
-    public init(resuming savedState: MoshSessionState, config: SSHConnectionConfig) {
+    public init(
+        resuming savedState: MoshSessionState,
+        config: SSHConnectionConfig,
+        bootstrapOptions: MoshBootstrapOptions = .init()
+    ) {
         self.config = config
+        self.bootstrapOptions = bootstrapOptions
         self.savedState = savedState
 
         var sc: AsyncStream<TransportState>.Continuation!
@@ -118,7 +125,7 @@ public final class MoshTransport: ResumableTransport, @unchecked Sendable {
         // SSH is closed after bootstrap; mosh communicates entirely over UDP.
         let session: MoshSession
         do {
-            session = try await MoshBootstrap.start(config: config)
+            session = try await MoshBootstrap.start(config: config, options: bootstrapOptions)
         } catch {
             stateContinuation.yield(.failed(error))
             throw error

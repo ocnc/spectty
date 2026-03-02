@@ -48,7 +48,7 @@ public enum SSHKeyImportError: Error, Sendable {
 /// Parses OpenSSH private key files (the `-----BEGIN OPENSSH PRIVATE KEY-----` PEM format)
 /// and returns the raw key material suitable for use with CryptoKit.
 ///
-/// Only **unencrypted** Ed25519 and ECDSA (P-256) keys are currently supported.
+/// Only **unencrypted** Ed25519 and ECDSA (P-256/P-384) keys are currently supported.
 public struct SSHKeyImporter: Sendable {
 
     public init() {}

@@ -1,6 +1,9 @@
 import Foundation
 import SpecttyTerminal
 import SpecttyTransport
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// An active terminal session wiring together a transport and emulator.
 @Observable
@@ -33,13 +36,7 @@ final class TerminalSession: Identifiable {
         self.transportFactory = transportFactory
         self.startupCommand = startupCommand
 
-        // Wire terminal responses (DSR, DA) back through the transport.
-        // Route through the same outbound queue to preserve ordering.
-        self.emulator.onResponse = { [weak self] data in
-            Task { @MainActor [weak self] in
-                self?.enqueueOutboundSend(data)
-            }
-        }
+        configureEmulatorCallbacks()
     }
 
     /// Start the session: connect and begin piping data.
@@ -130,12 +127,7 @@ final class TerminalSession: Identifiable {
         let newTransport = transportFactory()
         self.transport = newTransport
 
-        // Re-wire emulator response handler
-        self.emulator.onResponse = { [weak self] data in
-            Task { @MainActor [weak self] in
-                self?.enqueueOutboundSend(data)
-            }
-        }
+        configureEmulatorCallbacks()
 
         // Connect and start streams (same as start())
         try await newTransport.connect()
@@ -193,6 +185,33 @@ final class TerminalSession: Identifiable {
     private func sendStartupCommand() {
         guard let cmd = startupCommand, !cmd.isEmpty else { return }
         enqueueOutboundSend(Data((cmd + "\n").utf8))
+    }
+
+    private func configureEmulatorCallbacks() {
+        // Route terminal responses (DSR, DA, OSC queries) through outbound
+        // send ordering so responses and key input stay in sequence.
+        emulator.onResponse = { [weak self] data in
+            Task { @MainActor [weak self] in
+                self?.enqueueOutboundSend(data)
+            }
+        }
+
+        emulator.onSetClipboard = { text in
+            #if canImport(UIKit)
+            UIPasteboard.general.string = text
+            #endif
+        }
+
+        emulator.onGetClipboard = {
+            #if canImport(UIKit)
+            guard UserDefaults.standard.bool(forKey: "allowRemoteClipboardRead") else {
+                return nil
+            }
+            return UIPasteboard.general.string
+            #else
+            return nil
+            #endif
+        }
     }
 
     /// Queue outbound payloads so they are sent in-order, even when the UI

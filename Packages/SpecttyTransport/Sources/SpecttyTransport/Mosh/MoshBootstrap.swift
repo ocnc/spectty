@@ -19,7 +19,7 @@ enum MoshBootstrap {
     ///
     /// Matches the real mosh client's behavior: allocates a PTY (-tt) before
     /// exec, runs mosh-server directly, reads MOSH CONNECT, then closes SSH.
-    static func start(config: SSHConnectionConfig) async throws -> MoshSession {
+    static func start(config: SSHConnectionConfig, options: MoshBootstrapOptions = .init()) async throws -> MoshSession {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
 
         let authDelegate: NIOSSHClientUserAuthenticationDelegate = switch config.authMethod {
@@ -29,7 +29,7 @@ enum MoshBootstrap {
             SSHPublicKeyDelegate(username: config.username, privateKey: key)
         }
         nonisolated(unsafe) let authDelegateRef = authDelegate
-        let serverAuthDelegate = AcceptAllHostKeysDelegate()
+        let serverAuthDelegate = TOFUHostKeysDelegate(host: config.host, port: config.port)
 
         let bootstrap = ClientBootstrap(group: group)
             .channelInitializer { channel in
@@ -53,6 +53,9 @@ enum MoshBootstrap {
         let parentChannel: Channel
         do {
             parentChannel = try await bootstrap.connect(host: config.host, port: config.port).get()
+        } catch let error as SSHTransportError {
+            group.shutdownGracefully { _ in }
+            throw error
         } catch {
             group.shutdownGracefully { _ in }
             throw MoshError.bootstrapFailed("SSH connection failed: \(error)")
@@ -92,27 +95,29 @@ enum MoshBootstrap {
             throw MoshError.bootstrapFailed("Failed to open SSH channel: \(error)")
         }
 
-        // Request PTY allocation before exec, matching the real mosh client's
-        // `-tt` SSH flag. This creates a proper session with a controlling
-        // terminal on the server side, which is how mosh-server expects to run.
-        let ptyRequest = SSHChannelRequestEvent.PseudoTerminalRequest(
-            wantReply: true,
-            term: "xterm-256color",
-            terminalCharacterWidth: 80,
-            terminalRowHeight: 24,
-            terminalPixelWidth: 0,
-            terminalPixelHeight: 0,
-            terminalModes: SSHTerminalModes([:])
-        )
-        let ptyPromise = childChannel.eventLoop.makePromise(of: Void.self)
-        childChannel.triggerUserOutboundEvent(ptyRequest, promise: ptyPromise)
+        if options.allocatePTY {
+            // Request PTY allocation before exec, matching the real mosh client's
+            // `-tt` SSH flag. This creates a proper session with a controlling
+            // terminal on the server side, which is how mosh-server expects to run.
+            let ptyRequest = SSHChannelRequestEvent.PseudoTerminalRequest(
+                wantReply: true,
+                term: "xterm-256color",
+                terminalCharacterWidth: 80,
+                terminalRowHeight: 24,
+                terminalPixelWidth: 0,
+                terminalPixelHeight: 0,
+                terminalModes: SSHTerminalModes([:])
+            )
+            let ptyPromise = childChannel.eventLoop.makePromise(of: Void.self)
+            childChannel.triggerUserOutboundEvent(ptyRequest, promise: ptyPromise)
 
-        do {
-            try await ptyPromise.futureResult.get()
-        } catch {
-            parentChannel.close(promise: nil)
-            group.shutdownGracefully { _ in }
-            throw MoshError.bootstrapFailed("PTY allocation failed: \(error)")
+            do {
+                try await ptyPromise.futureResult.get()
+            } catch {
+                parentChannel.close(promise: nil)
+                group.shutdownGracefully { _ in }
+                throw MoshError.bootstrapFailed("PTY allocation failed: \(error)")
+            }
         }
 
         // Exec mosh-server directly (like the real mosh client).
@@ -125,8 +130,7 @@ enum MoshBootstrap {
         // packets. Prevents orphaned mosh-servers from accumulating when
         // the app crashes, is killed, or the network changes permanently.
         // During active use, heartbeats every 3s keep the server alive.
-        let bindAddr = config.host.contains(":") ? "::" : "0.0.0.0"
-        let command = "export PATH=\"/opt/homebrew/bin:/usr/local/bin:/usr/bin:/snap/bin:/nix/var/nix/profiles/default/bin:$PATH\" MOSH_SERVER_NETWORK_TMOUT=600; exec mosh-server new -i \(bindAddr) -c 256 -l LANG=en_US.UTF-8"
+        let command = buildServerCommand(config: config, options: options)
         let execRequest = SSHChannelRequestEvent.ExecRequest(
             command: command,
             wantReply: true
@@ -168,7 +172,14 @@ enum MoshBootstrap {
         // Parse "MOSH CONNECT <port> <key>"
         let parsed: ParsedConnect
         do {
-            parsed = try parseMoshConnect(output: output, host: config.host)
+            let defaultResolvedHost = parentChannel.remoteAddress?.ipAddress ?? config.host
+            let localResolvedHost = resolveHostLocally(host: config.host)
+            parsed = try parseMoshConnect(
+                output: output,
+                defaultHost: defaultResolvedHost,
+                localResolvedHost: localResolvedHost,
+                ipResolution: options.ipResolution
+            )
         } catch {
             parentChannel.close(promise: nil)
             group.shutdownGracefully { _ in }
@@ -210,7 +221,7 @@ enum MoshBootstrap {
                     SSHPublicKeyDelegate(username: config.username, privateKey: key)
                 }
                 nonisolated(unsafe) let authDelegateRef = authDelegate
-                let serverAuthDelegate = AcceptAllHostKeysDelegate()
+                let serverAuthDelegate = TOFUHostKeysDelegate(host: config.host, port: config.port)
 
                 let bootstrap = ClientBootstrap(group: group)
                     .channelInitializer { channel in
@@ -269,7 +280,21 @@ enum MoshBootstrap {
 
     /// Parse mosh-server output for the MOSH CONNECT line.
     /// Handles PTY output which may contain `\r` characters from TTY line discipline.
-    static func parseMoshConnect(output: String, host: String) throws -> ParsedConnect {
+    static func parseMoshConnect(
+        output: String,
+        defaultHost: String,
+        localResolvedHost: String? = nil,
+        ipResolution: MoshIPResolution = .default
+    ) throws -> ParsedConnect {
+        let targetHost: String = switch ipResolution {
+        case .default:
+            defaultHost
+        case .local:
+            localResolvedHost ?? defaultHost
+        case .remote:
+            parseRemoteHostFromSSHConnection(output: output) ?? defaultHost
+        }
+
         for line in output.components(separatedBy: .newlines) {
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.hasPrefix("MOSH CONNECT") {
@@ -281,10 +306,88 @@ enum MoshBootstrap {
                     throw MoshError.bootstrapFailed("Invalid port in MOSH CONNECT: \(parts[2])")
                 }
                 let key = String(parts[3])
-                return ParsedConnect(host: host, udpPort: port, key: key)
+                return ParsedConnect(host: targetHost, udpPort: port, key: key)
             }
         }
         throw MoshError.bootstrapFailed("No MOSH CONNECT line in server output: \(output)")
+    }
+
+    private static func parseRemoteHostFromSSHConnection(output: String) -> String? {
+        for line in output.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.hasPrefix("MOSH SSH_CONNECTION") else { continue }
+            let parts = trimmed.split(separator: " ")
+            // MOSH SSH_CONNECTION <client_ip> <client_port> <server_ip> <server_port>
+            guard parts.count >= 6 else { continue }
+            return String(parts[4])
+        }
+        return nil
+    }
+
+    static func buildServerCommand(config: SSHConnectionConfig, options: MoshBootstrapOptions) -> String {
+        let bindAddr = bindAddress(for: config.host, family: options.bindFamily)
+        let serverPath = sanitized(options.serverPath) ?? "mosh-server"
+
+        var args: [String] = ["new", "-i", bindAddr]
+        if let udpPortRange = sanitizedUDPPortRange(options.udpPortRange) {
+            args.append(contentsOf: ["-p", udpPortRange])
+        }
+        args.append(contentsOf: ["-c", "256", "-l", "LANG=en_US.UTF-8"])
+
+        let env = "export PATH=\"/opt/homebrew/bin:/usr/local/bin:/usr/bin:/snap/bin:/nix/var/nix/profiles/default/bin:$PATH\" MOSH_SERVER_NETWORK_TMOUT=600;"
+        let runServer = "exec \(shellQuote(serverPath)) \(args.joined(separator: " "))"
+        if options.ipResolution == .remote {
+            return "\(env) echo \"MOSH SSH_CONNECTION $SSH_CONNECTION\"; \(runServer)"
+        } else {
+            return "\(env) \(runServer)"
+        }
+    }
+
+    private static func bindAddress(for host: String, family: MoshBindFamily) -> String {
+        switch family {
+        case .automatic:
+            return host.contains(":") ? "::" : "0.0.0.0"
+        case .ipv4:
+            return "0.0.0.0"
+        case .ipv6:
+            return "::"
+        }
+    }
+
+    private static func sanitized(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func resolveHostLocally(host: String) -> String? {
+        let trimmedHost = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+
+        if let parsed = try? SocketAddress(ipAddress: trimmedHost, port: 0),
+           let ip = parsed.ipAddress {
+            return ip
+        }
+
+        if let resolved = try? SocketAddress.makeAddressResolvingHost(trimmedHost, port: 0),
+           let ip = resolved.ipAddress {
+            return ip
+        }
+
+        return nil
+    }
+
+    private static func sanitizedUDPPortRange(_ value: String?) -> String? {
+        guard let value = sanitized(value) else { return nil }
+        let allowed = CharacterSet(charactersIn: "0123456789:")
+        guard value.unicodeScalars.allSatisfy({ allowed.contains($0) }) else {
+            return nil
+        }
+        return value
+    }
+
+    private static func shellQuote(_ raw: String) -> String {
+        // POSIX shell single-quote escaping.
+        "'\(raw.replacingOccurrences(of: "'", with: "'\\''"))'"
     }
 }
 
