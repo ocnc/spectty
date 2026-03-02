@@ -204,6 +204,9 @@ final class TerminalSession: Identifiable {
 
         emulator.onGetClipboard = {
             #if canImport(UIKit)
+            guard UserDefaults.standard.bool(forKey: "allowRemoteClipboardRead") else {
+                return nil
+            }
             return UIPasteboard.general.string
             #else
             return nil

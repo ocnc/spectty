@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import SpecttyKeychain
+import SpecttyTransport
 
 struct ConnectionListView: View {
     @Environment(SessionManager.self) private var sessionManager
@@ -16,6 +17,7 @@ struct ConnectionListView: View {
     @State private var showPasswordPrompt = false
     @State private var renamingSession: TerminalSession?
     @State private var sessionRenameText = ""
+    @State private var hostKeyRecovery: HostKeyRecoveryContext?
 
     var body: some View {
         NavigationStack {
@@ -156,9 +158,22 @@ struct ConnectionListView: View {
             }
             .alert("Connection Failed", isPresented: .init(
                 get: { connectionError != nil },
-                set: { if !$0 { connectionError = nil } }
+                set: {
+                    if !$0 {
+                        connectionError = nil
+                        hostKeyRecovery = nil
+                    }
+                }
             )) {
-                Button("OK") { connectionError = nil }
+                if hostKeyRecovery != nil {
+                    Button("Trust New Key & Retry") {
+                        trustNewHostKeyAndReconnect()
+                    }
+                }
+                Button("OK", role: .cancel) {
+                    connectionError = nil
+                    hostKeyRecovery = nil
+                }
             } message: {
                 if let error = connectionError {
                     Text(error)
@@ -255,10 +270,65 @@ struct ConnectionListView: View {
             _ = try await sessionManager.connect(to: connection)
             connection.lastConnected = Date()
             connectionStore.save()
+            connectionError = nil
+            hostKeyRecovery = nil
             showCarousel = true
         } catch {
-            connectionError = String(describing: error)
+            let display = userFacingError(error)
+            if let recovery = hostKeyRecoveryContext(for: error, connection: connection) {
+                hostKeyRecovery = recovery
+                connectionError = """
+                \(display)
+
+                If you expected this change, tap "Trust New Key & Retry".
+                """
+            } else {
+                hostKeyRecovery = nil
+                connectionError = display
+            }
         }
+    }
+
+    private func trustNewHostKeyAndReconnect() {
+        guard let recovery = hostKeyRecovery else { return }
+        hostKeyRecovery = nil
+        connectionError = nil
+
+        Task {
+            do {
+                try await SSHHostKeyTrustManager.forget(host: recovery.host, port: recovery.port)
+                await doConnect(recovery.connection)
+            } catch {
+                connectionError = "Failed to forget trusted host key: \(userFacingError(error))"
+            }
+        }
+    }
+
+    private func hostKeyRecoveryContext(
+        for error: any Error,
+        connection: ServerConnection
+    ) -> HostKeyRecoveryContext? {
+        if let transportError = error as? SSHTransportError,
+           case let .hostKeyMismatch(host, port, _, _) = transportError {
+            return HostKeyRecoveryContext(host: host, port: port, connection: connection)
+        }
+
+        if let moshError = error as? MoshError,
+           case let .bootstrapFailed(detail) = moshError,
+           detail.localizedCaseInsensitiveContains("host key mismatch") {
+            return HostKeyRecoveryContext(host: connection.host, port: connection.port, connection: connection)
+        }
+
+        return nil
+    }
+
+    private func userFacingError(_ error: any Error) -> String {
+        if let localizedError = error as? LocalizedError,
+           let description = localizedError.errorDescription,
+           !description.isEmpty {
+            return description
+        }
+        return String(describing: error)
     }
 
     private func quickConnect() {
@@ -290,4 +360,10 @@ struct ConnectionListView: View {
         )
         connectTo(connection)
     }
+}
+
+private struct HostKeyRecoveryContext {
+    let host: String
+    let port: Int
+    let connection: ServerConnection
 }

@@ -53,6 +53,9 @@ enum MoshBootstrap {
         let parentChannel: Channel
         do {
             parentChannel = try await bootstrap.connect(host: config.host, port: config.port).get()
+        } catch let error as SSHTransportError {
+            group.shutdownGracefully { _ in }
+            throw error
         } catch {
             group.shutdownGracefully { _ in }
             throw MoshError.bootstrapFailed("SSH connection failed: \(error)")
@@ -321,7 +324,7 @@ enum MoshBootstrap {
         return nil
     }
 
-    private static func buildServerCommand(config: SSHConnectionConfig, options: MoshBootstrapOptions) -> String {
+    static func buildServerCommand(config: SSHConnectionConfig, options: MoshBootstrapOptions) -> String {
         let bindAddr = bindAddress(for: config.host, family: options.bindFamily)
         let serverPath = sanitized(options.serverPath) ?? "mosh-server"
 

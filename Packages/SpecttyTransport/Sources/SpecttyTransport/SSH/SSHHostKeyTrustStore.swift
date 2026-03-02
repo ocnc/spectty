@@ -33,6 +33,13 @@ actor SSHHostKeyTrustStore {
         return .trusted
     }
 
+    func remove(host: String, port: Int) throws {
+        try loadIfNeeded()
+        let key = Self.hostIdentifier(host: host, port: port)
+        guard entries.removeValue(forKey: key) != nil else { return }
+        try persist()
+    }
+
     private func loadIfNeeded() throws {
         guard !didLoad else { return }
         defer { didLoad = true }
@@ -54,6 +61,14 @@ actor SSHHostKeyTrustStore {
 
         let data = try JSONEncoder().encode(entries)
         try data.write(to: fileURL, options: .atomic)
+
+        // Ensure trusted-host metadata is encrypted at rest when the platform supports it.
+        #if os(iOS) || os(tvOS) || os(watchOS) || targetEnvironment(macCatalyst)
+        try fileManager.setAttributes(
+            [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+            ofItemAtPath: fileURL.path
+        )
+        #endif
     }
 
     nonisolated static func hostIdentifier(host: String, port: Int) -> String {
@@ -75,5 +90,13 @@ actor SSHHostKeyTrustStore {
         return fileManager.temporaryDirectory
             .appendingPathComponent("Spectty", isDirectory: true)
             .appendingPathComponent("ssh_known_hosts.json", isDirectory: false)
+    }
+}
+
+/// Public API for host-key trust management (used by app UI for recovery flows).
+public enum SSHHostKeyTrustManager {
+    /// Forget a previously trusted host key so the next connection can re-TOFU.
+    public static func forget(host: String, port: Int) async throws {
+        try await SSHHostKeyTrustStore.shared.remove(host: host, port: port)
     }
 }

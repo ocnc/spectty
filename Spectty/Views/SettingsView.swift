@@ -7,6 +7,7 @@ struct SettingsView: View {
     @AppStorage("defaultColorScheme") private var colorScheme = "Default"
     @AppStorage("scrollbackLines") private var scrollbackLines = 10_000
     @AppStorage("cursorStyle") private var cursorStyle = "block"
+    @AppStorage("allowRemoteClipboardRead") private var allowRemoteClipboardRead = false
     @AppStorage("privacyModeEnabled") private var privacyModeEnabled = false
     @AppStorage("biometricUnlockEnabled") private var biometricUnlockEnabled = false
 
@@ -46,6 +47,8 @@ struct SettingsView: View {
                         .multilineTextAlignment(.trailing)
                         .frame(width: 80)
                 }
+
+                Toggle("Allow Remote Clipboard Read (OSC 52)", isOn: $allowRemoteClipboardRead)
             }
 
             Section("Security") {

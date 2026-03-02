@@ -152,7 +152,7 @@ final class TOFUHostKeysDelegate: NIOSSHClientServerAuthenticationDelegate {
         }
 
         let digest = SHA256.hash(data: keyData)
-        return Data(digest).base64EncodedString()
+        return Data(digest).base64EncodedString().trimmingCharacters(in: CharacterSet(charactersIn: "="))
     }
 }
 

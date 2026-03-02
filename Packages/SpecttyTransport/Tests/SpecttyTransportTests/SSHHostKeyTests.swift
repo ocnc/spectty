@@ -70,6 +70,24 @@ struct SSHHostKeyTests {
         }
     }
 
+    @Test("Forgetting a trusted host allows trusting a replacement key")
+    func forgetsTrustedHostKey() async throws {
+        let storeURL = makeTemporaryStoreURL()
+        defer { cleanupTemporaryStore(at: storeURL) }
+
+        let store = SSHHostKeyTrustStore(fileURL: storeURL)
+        _ = try await store.validate(host: "example.com", port: 22, presentedKey: key1)
+        try await store.remove(host: "example.com", port: 22)
+
+        let replacement = try await store.validate(host: "example.com", port: 22, presentedKey: key2)
+        switch replacement {
+        case .trusted:
+            break
+        case .mismatch:
+            Issue.record("Forgotten host key should allow trusting replacement key")
+        }
+    }
+
     private func makeTemporaryStoreURL() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("spectty-hostkeys-\(UUID().uuidString)", isDirectory: true)
