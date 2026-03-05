@@ -39,43 +39,35 @@ struct SessionCarouselView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                HStack(spacing: 12) {
+                Menu {
                     Button {
-                        dismissKeyboard()
-                    } label: {
-                        Image(systemName: "keyboard.chevron.compact.down")
-                    }
-
-                    Menu {
-                        Button {
-                            if let session = sessionManager.activeSession {
-                                UIPasteboard.general.string.map { text in
-                                    session.sendData(Data(text.utf8))
-                                }
+                        if let session = sessionManager.activeSession {
+                            UIPasteboard.general.string.map { text in
+                                session.sendData(Data(text.utf8))
                             }
-                        } label: {
-                            Label("Paste", systemImage: "doc.on.clipboard")
-                        }
-
-                        Button {
-                            if let session = sessionManager.activeSession {
-                                renameText = session.connectionName
-                                showRenameAlert = true
-                            }
-                        } label: {
-                            Label("Rename", systemImage: "pencil")
-                        }
-
-                        Divider()
-
-                        Button(role: .destructive) {
-                            showDisconnectConfirm = true
-                        } label: {
-                            Label("Disconnect", systemImage: "xmark.circle")
                         }
                     } label: {
-                        Image(systemName: "ellipsis.circle")
+                        Label("Paste", systemImage: "doc.on.clipboard")
                     }
+
+                    Button {
+                        if let session = sessionManager.activeSession {
+                            renameText = session.connectionName
+                            showRenameAlert = true
+                        }
+                    } label: {
+                        Label("Rename", systemImage: "pencil")
+                    }
+
+                    Divider()
+
+                    Button(role: .destructive) {
+                        showDisconnectConfirm = true
+                    } label: {
+                        Label("Disconnect", systemImage: "xmark.circle")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
                 }
             }
         }
@@ -117,10 +109,6 @@ struct SessionCarouselView: View {
     private var activeTitle: String {
         guard let session = sessionManager.activeSession else { return "" }
         return session.title.isEmpty ? session.connectionName : session.title
-    }
-
-    private func dismissKeyboard() {
-        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 
     // MARK: - Edge Swipe
