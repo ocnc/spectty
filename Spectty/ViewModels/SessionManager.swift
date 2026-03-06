@@ -115,6 +115,7 @@ final class SessionManager {
             startupCommand: connection.startupCommand,
             scrollbackCapacity: scrollbackLines > 0 ? scrollbackLines : 10_000
         )
+        attachSessionLifecycle(session)
 
         sessions.append(session)
         sessionConnectionIDs[session.id] = connection.id.uuidString
@@ -229,6 +230,7 @@ final class SessionManager {
             transport: transport,
             scrollbackCapacity: scrollbackLines > 0 ? scrollbackLines : 10_000
         )
+        attachSessionLifecycle(session)
 
         sessions.append(session)
         sessionConnectionIDs[session.id] = savedState.connectionID
@@ -323,5 +325,11 @@ final class SessionManager {
             bindFamily: bindFamily,
             ipResolution: ipResolution
         )
+    }
+
+    private func attachSessionLifecycle(_ session: TerminalSession) {
+        session.onSessionEnded = { [weak self] endedSession in
+            self?.disconnect(endedSession)
+        }
     }
 }

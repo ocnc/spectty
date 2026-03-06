@@ -27,6 +27,8 @@ final class TerminalSession: Identifiable {
     nonisolated(unsafe) private var autoReconnectTask: Task<Void, Never>?
     @ObservationIgnored
     private var outboundSendTail: Task<Void, Never>?
+    @ObservationIgnored
+    var onSessionEnded: ((TerminalSession) -> Void)?
 
     init(id: UUID = UUID(), connectionName: String, transport: any TerminalTransport, transportFactory: (@Sendable () -> any TerminalTransport)? = nil, startupCommand: String? = nil, columns: Int = 80, rows: Int = 24, scrollbackCapacity: Int = 10_000) {
         self.id = id
@@ -54,11 +56,7 @@ final class TerminalSession: Identifiable {
         stateTask = Task { [weak self] in
             for await state in stateStream {
                 guard let self else { break }
-                if case .disconnected = state, self.transportFactory != nil {
-                    self.attemptAutoReconnect()
-                } else {
-                    self.transportState = state
-                }
+                self.handleTransportState(state)
             }
         }
 
@@ -139,11 +137,7 @@ final class TerminalSession: Identifiable {
         stateTask = Task { [weak self] in
             for await state in newStateStream {
                 guard let self else { break }
-                if case .disconnected = state, self.transportFactory != nil {
-                    self.attemptAutoReconnect()
-                } else {
-                    self.transportState = state
-                }
+                self.handleTransportState(state)
             }
         }
 
@@ -179,6 +173,18 @@ final class TerminalSession: Identifiable {
                 self.transportState = .failed(error)
             }
             self.autoReconnectTask = nil
+        }
+    }
+
+    private func handleTransportState(_ state: TransportState) {
+        switch state {
+        case .disconnected where transportFactory != nil:
+            attemptAutoReconnect()
+        case .sessionEnded:
+            transportState = .sessionEnded
+            onSessionEnded?(self)
+        default:
+            transportState = state
         }
     }
 

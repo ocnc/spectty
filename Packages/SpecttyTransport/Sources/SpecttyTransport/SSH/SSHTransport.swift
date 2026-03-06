@@ -68,6 +68,8 @@ public final class SSHTransport: TerminalTransport, @unchecked Sendable {
     nonisolated(unsafe) private var childChannel: Channel?
 
     nonisolated(unsafe) private var keepaliveTask: Task<Void, Never>?
+    nonisolated(unsafe) private var isDisconnecting = false
+    nonisolated(unsafe) private var didTerminateConnection = false
 
     // Track the last known terminal size for use in PTY allocation.
     nonisolated(unsafe) private var currentColumns: Int = 80
@@ -115,6 +117,8 @@ public final class SSHTransport: TerminalTransport, @unchecked Sendable {
         guard parentChannel == nil else {
             throw SSHTransportError.alreadyConnected
         }
+        isDisconnecting = false
+        didTerminateConnection = false
 
         stateContinuation.yield(.connecting)
 
@@ -176,10 +180,14 @@ public final class SSHTransport: TerminalTransport, @unchecked Sendable {
     }
 
     public func disconnect() async throws {
+        isDisconnecting = true
+        defer { isDisconnecting = false }
+
         keepaliveTask?.cancel()
         keepaliveTask = nil
 
         guard let parent = parentChannel else {
+            didTerminateConnection = true
             return // Already disconnected; no-op.
         }
 
@@ -190,6 +198,7 @@ public final class SSHTransport: TerminalTransport, @unchecked Sendable {
 
         try await parent.close()
         self.parentChannel = nil
+        didTerminateConnection = true
 
         if ownsEventLoopGroup {
             try await eventLoopGroup.shutdownGracefully()
@@ -242,11 +251,31 @@ public final class SSHTransport: TerminalTransport, @unchecked Sendable {
     // MARK: - Private
 
     private func handleConnectionDeath() {
+        guard !isDisconnecting else { return }
+        terminateConnection(state: .disconnected, closeParent: false)
+    }
+
+    private func handleSessionChannelClosed() {
+        guard !isDisconnecting else { return }
+        terminateConnection(state: .sessionEnded, closeParent: true)
+    }
+
+    private func terminateConnection(state: TransportState, closeParent: Bool) {
+        guard !didTerminateConnection else { return }
+        didTerminateConnection = true
+
         keepaliveTask?.cancel()
         keepaliveTask = nil
+
+        let parent = parentChannel
         parentChannel = nil
         childChannel = nil
-        stateContinuation.yield(.disconnected)
+
+        if closeParent, let parent, parent.isActive {
+            parent.close(promise: nil)
+        }
+
+        stateContinuation.yield(state)
         dataContinuation.finish()
     }
 
@@ -308,6 +337,9 @@ public final class SSHTransport: TerminalTransport, @unchecked Sendable {
         }.get()
 
         self.childChannel = childChannel
+        childChannel.closeFuture.whenComplete { [weak self] _ in
+            self?.handleSessionChannelClosed()
+        }
 
         // Request PTY allocation using the current terminal size.
         let ptyRequest = SSHChannelRequestEvent.PseudoTerminalRequest(

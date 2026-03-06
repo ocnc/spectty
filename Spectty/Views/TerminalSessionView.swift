@@ -67,6 +67,8 @@ struct TerminalSessionView: View {
                     showSpinner: false
                 )
             }
+        case .sessionEnded:
+            EmptyView()
         case .connected:
             EmptyView()
         }

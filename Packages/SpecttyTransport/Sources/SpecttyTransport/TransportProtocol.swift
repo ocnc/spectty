@@ -3,6 +3,7 @@ import Foundation
 /// Represents the current state of a terminal transport connection.
 public enum TransportState: Sendable {
     case disconnected
+    case sessionEnded
     case connecting
     case connected
     case reconnecting
@@ -13,6 +14,7 @@ extension TransportState: CustomStringConvertible {
     public var description: String {
         switch self {
         case .disconnected: return "disconnected"
+        case .sessionEnded: return "sessionEnded"
         case .connecting: return "connecting"
         case .connected: return "connected"
         case .reconnecting: return "reconnecting"
@@ -46,7 +48,7 @@ public protocol TerminalTransport: AnyObject, Sendable {
     func resize(columns: Int, rows: Int) async throws
 
     /// Check whether the connection is still alive.
-    /// If the connection is dead, the transport should yield `.disconnected` or `.failed`.
+    /// If the connection is dead, the transport should yield `.disconnected`, `.sessionEnded`, or `.failed`.
     func checkConnection() async
 }
 
