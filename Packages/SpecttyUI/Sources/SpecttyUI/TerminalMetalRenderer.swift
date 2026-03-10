@@ -18,7 +18,13 @@ public struct TerminalFont: Sendable {
 
 /// Protocol for terminal renderers (allows swapping Metal impl for libghostty's renderer).
 public protocol TerminalRenderer: AnyObject {
-    func update(state: TerminalScreenState, scrollback: TerminalBuffer, scrollOffset: Int, viewportSize: CGSize)
+    func update(
+        state: TerminalScreenState,
+        scrollback: TerminalBuffer,
+        scrollOffset: Int,
+        viewportSize: CGSize,
+        contentRect: CGRect
+    )
     func setFont(_ font: TerminalFont)
     var cellSize: CGSize { get }
 }
@@ -305,7 +311,13 @@ public final class TerminalMetalRenderer: TerminalRenderer {
 
     // MARK: - Update State
 
-    public func update(state: TerminalScreenState, scrollback: TerminalBuffer, scrollOffset: Int, viewportSize: CGSize) {
+    public func update(
+        state: TerminalScreenState,
+        scrollback: TerminalBuffer,
+        scrollOffset: Int,
+        viewportSize: CGSize,
+        contentRect: CGRect
+    ) {
         // Build vertex data for all visible cells.
         var vertices: [CellVertex] = []
         vertices.reserveCapacity(state.columns * state.rows * 6) // 6 vertices per cell (2 triangles)
@@ -317,6 +329,8 @@ public final class TerminalMetalRenderer: TerminalRenderer {
         let viewH = max(Float(viewportSize.height), 1)
         let cellW = Float(_cellSize.width)
         let cellH = Float(_cellSize.height)
+        let originX = Float(contentRect.minX)
+        let originY = Float(contentRect.minY)
 
         for row in 0..<state.rows {
             let lineIndex: Int
@@ -372,8 +386,8 @@ public final class TerminalMetalRenderer: TerminalRenderer {
                 )
 
                 // Position in pixel coordinates (top-left origin).
-                let x0 = Float(col) * cellW
-                let y0 = Float(row) * cellH
+                let x0 = originX + Float(col) * cellW
+                let y0 = originY + Float(row) * cellH
                 let x1 = x0 + cellW
                 let y1 = y0 + cellH
 
@@ -409,8 +423,8 @@ public final class TerminalMetalRenderer: TerminalRenderer {
             let cursorRow = state.cursor.row
             let cursorCol = state.cursor.col
             if cursorRow >= 0 && cursorRow < state.rows && cursorCol >= 0 && cursorCol < state.columns {
-                let x0 = Float(cursorCol) * cellW
-                let y0 = Float(cursorRow) * cellH
+                let x0 = originX + Float(cursorCol) * cellW
+                let y0 = originY + Float(cursorRow) * cellH
 
                 // Compute cursor rect based on style.
                 let cursorX0: Float

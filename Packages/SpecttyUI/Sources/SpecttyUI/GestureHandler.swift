@@ -167,10 +167,9 @@ public final class GestureHandler: NSObject {
         guard let metalView = metalView else { return }
 
         let point = gesture.location(in: metalView)
-        let cellSize = metalView.cellSize
-        let grid = metalView.gridSize
-        let col = max(0, min(Int(point.x / cellSize.width), grid.columns - 1))
-        let row = max(0, min(Int(point.y / cellSize.height), grid.rows - 1))
+        let coord = metalView.gridCoordinate(for: point)
+        let row = coord.row
+        let col = coord.col
 
         switch gesture.state {
         case .began:
@@ -212,13 +211,10 @@ public final class GestureHandler: NSObject {
     private func requestMenu() {
         guard let sel = currentSelection else { return }
         guard let metalView = metalView else { return }
-        let cellSize = metalView.cellSize
         let norm = sel.normalized
 
         let midRow = (norm.startRow + norm.endRow) / 2
-        let centerX = CGFloat(norm.startCol + norm.endCol + 1) / 2.0 * cellSize.width
-        let centerY = CGFloat(midRow) * cellSize.height + cellSize.height / 2.0
-        onShowMenu?(CGPoint(x: centerX, y: centerY))
+        onShowMenu?(metalView.selectionCenterPoint(row: midRow, startCol: norm.startCol, endCol: norm.endCol))
     }
 
     /// Update the tracked selection (e.g. when handles are dragged externally).

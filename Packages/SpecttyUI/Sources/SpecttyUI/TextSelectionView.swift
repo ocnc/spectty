@@ -52,6 +52,9 @@ public final class TextSelectionView: UIView {
 
     public var cellSize: CGSize = CGSize(width: 8, height: 16)
     public var selectionColor: UIColor = UIColor.systemBlue.withAlphaComponent(0.3)
+    public var contentInsets: UIEdgeInsets = .zero {
+        didSet { setNeedsDisplay() }
+    }
 
     // MARK: - Handle drag state
 
@@ -94,6 +97,31 @@ public final class TextSelectionView: UIView {
 
     // MARK: - Hit Testing
 
+    private var contentRect: CGRect {
+        let width = max(0, bounds.width - contentInsets.left - contentInsets.right)
+        let height = max(0, bounds.height - contentInsets.top - contentInsets.bottom)
+        return CGRect(x: contentInsets.left, y: contentInsets.top, width: width, height: height)
+    }
+
+    private var gridColumns: Int {
+        guard cellSize.width > 0 else { return 1 }
+        return max(1, Int(contentRect.width / cellSize.width))
+    }
+
+    private var gridRows: Int {
+        guard cellSize.height > 0 else { return 1 }
+        return max(1, Int(contentRect.height / cellSize.height))
+    }
+
+    private func clampedGridCoordinate(for point: CGPoint) -> (row: Int, col: Int) {
+        guard cellSize.width > 0, cellSize.height > 0 else { return (0, 0) }
+        let localX = point.x - contentRect.minX
+        let localY = point.y - contentRect.minY
+        let col = max(0, min(Int(localX / cellSize.width), gridColumns - 1))
+        let row = max(0, min(Int(localY / cellSize.height), gridRows - 1))
+        return (row, col)
+    }
+
     /// Only intercept touches near a drag handle. Everything else passes through
     /// to the terminal view underneath.
     public override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
@@ -115,16 +143,18 @@ public final class TextSelectionView: UIView {
 
     /// Center point of a handle in view coordinates.
     private func handleCenter(for sel: TerminalSelection, handle: DragHandle) -> CGPoint {
+        let originX = contentRect.minX
+        let originY = contentRect.minY
         switch handle {
         case .start:
             // Top-left of the start cell, handle sits above the selection.
-            let x = CGFloat(sel.startCol) * cellSize.width
-            let y = CGFloat(sel.startRow) * cellSize.height
+            let x = originX + CGFloat(sel.startCol) * cellSize.width
+            let y = originY + CGFloat(sel.startRow) * cellSize.height
             return CGPoint(x: x, y: y - handleStemHeight - handleRadius)
         case .end:
             // Bottom-right of the end cell, handle sits below the selection.
-            let x = CGFloat(sel.endCol + 1) * cellSize.width
-            let y = CGFloat(sel.endRow + 1) * cellSize.height
+            let x = originX + CGFloat(sel.endCol + 1) * cellSize.width
+            let y = originY + CGFloat(sel.endRow + 1) * cellSize.height
             return CGPoint(x: x, y: y + handleStemHeight + handleRadius)
         }
     }
@@ -153,18 +183,18 @@ public final class TextSelectionView: UIView {
                 endCol = selection.endCol
             } else if row == selection.startRow {
                 startCol = selection.startCol
-                endCol = Int(bounds.width / cellSize.width)
+                endCol = gridColumns - 1
             } else if row == selection.endRow {
                 startCol = 0
                 endCol = selection.endCol
             } else {
                 startCol = 0
-                endCol = Int(bounds.width / cellSize.width)
+                endCol = gridColumns - 1
             }
 
             let rect = CGRect(
-                x: CGFloat(startCol) * cellSize.width,
-                y: CGFloat(row) * cellSize.height,
+                x: contentRect.minX + CGFloat(startCol) * cellSize.width,
+                y: contentRect.minY + CGFloat(row) * cellSize.height,
                 width: CGFloat(endCol - startCol + 1) * cellSize.width,
                 height: cellSize.height
             )
@@ -183,15 +213,15 @@ public final class TextSelectionView: UIView {
         switch handle {
         case .start:
             // Stem from top-left of start cell down to circle.
-            let anchorX = CGFloat(selection.startCol) * cellSize.width
-            let anchorY = CGFloat(selection.startRow) * cellSize.height
+            let anchorX = contentRect.minX + CGFloat(selection.startCol) * cellSize.width
+            let anchorY = contentRect.minY + CGFloat(selection.startRow) * cellSize.height
             ctx.move(to: CGPoint(x: anchorX, y: anchorY))
             ctx.addLine(to: CGPoint(x: center.x, y: center.y + handleRadius))
             ctx.strokePath()
         case .end:
             // Stem from bottom-right of end cell up to circle.
-            let anchorX = CGFloat(selection.endCol + 1) * cellSize.width
-            let anchorY = CGFloat(selection.endRow + 1) * cellSize.height
+            let anchorX = contentRect.minX + CGFloat(selection.endCol + 1) * cellSize.width
+            let anchorY = contentRect.minY + CGFloat(selection.endRow + 1) * cellSize.height
             ctx.move(to: CGPoint(x: anchorX, y: anchorY))
             ctx.addLine(to: CGPoint(x: center.x, y: center.y - handleRadius))
             ctx.strokePath()
@@ -213,8 +243,9 @@ public final class TextSelectionView: UIView {
         guard var sel = selection?.normalized else { return }
 
         let point = gesture.location(in: self)
-        let col = max(0, min(Int(point.x / cellSize.width), Int(bounds.width / cellSize.width) - 1))
-        let row = max(0, min(Int(point.y / cellSize.height), Int(bounds.height / cellSize.height) - 1))
+        let coord = clampedGridCoordinate(for: point)
+        let row = coord.row
+        let col = coord.col
 
         switch gesture.state {
         case .began:
@@ -254,8 +285,8 @@ public final class TextSelectionView: UIView {
             // Show copy menu after handle drag finishes.
             if gesture.state == .ended, let sel = selection?.normalized {
                 let midRow = (sel.startRow + sel.endRow) / 2
-                let centerX = CGFloat(sel.startCol + sel.endCol + 1) / 2.0 * cellSize.width
-                let centerY = CGFloat(midRow) * cellSize.height + cellSize.height / 2.0
+                let centerX = contentRect.minX + CGFloat(sel.startCol + sel.endCol + 1) / 2.0 * cellSize.width
+                let centerY = contentRect.minY + CGFloat(midRow) * cellSize.height + cellSize.height / 2.0
                 onShowMenu?(CGPoint(x: centerX, y: centerY))
             }
 

@@ -34,6 +34,9 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
     /// Current font configuration.
     public private(set) var terminalFont = TerminalFont()
 
+    /// Built-in text gutter so terminal glyphs do not touch view edges.
+    private let terminalContentInsets = UIEdgeInsets(top: 3, left: 6, bottom: 3, right: 6)
+
     /// Gesture handler for scroll, pinch, selection.
     private var gestureHandler: GestureHandler?
 
@@ -81,6 +84,8 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
 
         // Selection overlay — hit tests only near drag handles, passes through otherwise.
         selectionView.frame = bounds
+        selectionView.contentInsets = terminalContentInsets
+        selectionView.cellSize = cellSize
         addSubview(selectionView)
 
         // Edit menu interaction for copy/paste — nil delegate uses default
@@ -430,13 +435,42 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
         renderer?.cellSize ?? CGSize(width: 8, height: 17)
     }
 
+    /// Drawable content rect after applying terminal insets.
+    var terminalContentRect: CGRect {
+        let rect = bounds.inset(by: terminalContentInsets)
+        guard rect.width > 0, rect.height > 0 else { return .zero }
+        return rect
+    }
+
     public var gridSize: (columns: Int, rows: Int) {
         guard let renderer = renderer else { return (80, 24) }
         let cellSize = renderer.cellSize
         guard cellSize.width > 0, cellSize.height > 0 else { return (80, 24) }
-        let columns = max(1, Int(bounds.width / cellSize.width))
-        let rows = max(1, Int(bounds.height / cellSize.height))
+        let rect = terminalContentRect
+        guard rect.width > 0, rect.height > 0 else { return (80, 24) }
+        let columns = max(1, Int(rect.width / cellSize.width))
+        let rows = max(1, Int(rect.height / cellSize.height))
         return (columns, rows)
+    }
+
+    /// Convert a point in view coordinates to a clamped terminal grid coordinate.
+    func gridCoordinate(for point: CGPoint) -> (row: Int, col: Int) {
+        let grid = gridSize
+        guard grid.columns > 0, grid.rows > 0 else { return (0, 0) }
+        let rect = terminalContentRect.isEmpty ? bounds : terminalContentRect
+        let localX = point.x - rect.minX
+        let localY = point.y - rect.minY
+        let col = max(0, min(Int(localX / cellSize.width), grid.columns - 1))
+        let row = max(0, min(Int(localY / cellSize.height), grid.rows - 1))
+        return (row, col)
+    }
+
+    /// Center point for a row/column selection in view coordinates.
+    func selectionCenterPoint(row: Int, startCol: Int, endCol: Int) -> CGPoint {
+        let rect = terminalContentRect.isEmpty ? bounds : terminalContentRect
+        let centerX = rect.minX + CGFloat(startCol + endCol + 1) / 2.0 * cellSize.width
+        let centerY = rect.minY + CGFloat(row) * cellSize.height + cellSize.height / 2.0
+        return CGPoint(x: centerX, y: centerY)
     }
 
     private func notifyResizeIfNeeded() {
@@ -467,6 +501,8 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
     public override func layoutSubviews() {
         super.layoutSubviews()
         selectionView.frame = bounds
+        selectionView.contentInsets = terminalContentInsets
+        selectionView.cellSize = cellSize
         bellLayer?.frame = bounds
         notifyResizeIfNeeded()
     }
@@ -524,8 +560,13 @@ extension TerminalMetalView: MTKViewDelegate {
         else { return }
 
         let state = emulator.state.activeScreen
-        renderer.update(state: state, scrollback: emulator.state.scrollback, scrollOffset: scrollOffset, viewportSize: bounds.size)
+        renderer.update(
+            state: state,
+            scrollback: emulator.state.scrollback,
+            scrollOffset: scrollOffset,
+            viewportSize: bounds.size,
+            contentRect: terminalContentRect
+        )
         renderer.render(to: renderPassDescriptor, drawable: drawable)
     }
 }
-
