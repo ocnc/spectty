@@ -89,8 +89,15 @@ struct ConnectionListView: View {
                                 isNewConnection = false
                                 editingConnection = connection
                             }
+                            Button("Clone") {
+                                Task {
+                                    await connectionStore.clone(connection)
+                                }
+                            }
                             Button("Delete", role: .destructive) {
-                                connectionStore.delete(connection)
+                                Task {
+                                    await connectionStore.delete(connection)
+                                }
                             }
                         }
                     }

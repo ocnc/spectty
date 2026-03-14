@@ -422,3 +422,32 @@ enum SpecttyMigrationPlan: SchemaMigrationPlan {
 }
 
 typealias ServerConnection = SpecttySchemaV4.ServerConnection
+
+extension ServerConnection {
+    var displayName: String {
+        name.isEmpty ? host : name
+    }
+
+    func makeClone(named cloneName: String? = nil) -> ServerConnection {
+        let clone = ServerConnection(
+            name: cloneName ?? name,
+            host: host,
+            port: port,
+            username: username,
+            transport: transport,
+            authMethod: authMethod
+        )
+        clone.profileName = profileName
+        clone.lastConnected = nil
+        clone.startupCommand = startupCommand
+        clone.moshPreset = moshPreset
+        clone.moshServerPath = moshServerPath
+        clone.moshUDPPortRange = moshUDPPortRange
+        clone.moshCompatibilityMode = moshCompatibilityMode
+        clone.moshBindFamily = moshBindFamily
+        clone.moshIPResolution = moshIPResolution
+        clone.password = password
+        clone.privateKeyPEM = privateKeyPEM
+        return clone
+    }
+}

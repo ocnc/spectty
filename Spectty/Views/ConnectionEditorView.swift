@@ -318,16 +318,20 @@ struct ConnectionEditorView: View {
             try? await keychain.delete(account: "private-key-\(uuid)")
             connection.privateKeyKeychainAccount = nil
 
-            guard !connection.password.isEmpty else { return }
             let account = "password-\(uuid)"
+            connection.passwordKeychainAccount = nil
+
+            guard !connection.password.isEmpty else { return }
             try? await keychain.saveOrUpdate(
                 key: Data(connection.password.utf8),
                 account: account
             )
+            connection.passwordKeychainAccount = account
 
         case .publicKey:
             // Clean up the credential from the other auth method.
             try? await keychain.delete(account: "password-\(uuid)")
+            connection.passwordKeychainAccount = nil
 
             guard !connection.privateKeyPEM.isEmpty else { return }
             let account = "private-key-\(uuid)"
@@ -341,6 +345,7 @@ struct ConnectionEditorView: View {
             // Clean up credentials from both other methods.
             try? await keychain.delete(account: "password-\(uuid)")
             try? await keychain.delete(account: "private-key-\(uuid)")
+            connection.passwordKeychainAccount = nil
             connection.privateKeyKeychainAccount = nil
         }
     }
