@@ -33,6 +33,10 @@ public final class GestureHandler: NSObject {
     /// Callback for edge-swipe gestures (session switching).
     public var onEdgeSwipe: ((EdgeSwipeEvent) -> Void)?
 
+    /// Callback for local tap fallback when remote mouse handling is inactive.
+    public var onLocalTap: (() -> Void)?
+
+    private var tapGesture: UITapGestureRecognizer?
     private var panGesture: UIPanGestureRecognizer?
     private var leftEdgeGesture: UIScreenEdgePanGestureRecognizer?
     private var rightEdgeGesture: UIScreenEdgePanGestureRecognizer?
@@ -55,7 +59,7 @@ public final class GestureHandler: NSObject {
     /// Remove all gesture recognizers from the metal view.
     public func removeGestures() {
         guard let metalView = metalView else { return }
-        [panGesture, pinchGesture, longPressGesture, twoFingerTapGesture].compactMap { $0 }.forEach {
+        [tapGesture, panGesture, pinchGesture, longPressGesture, twoFingerTapGesture].compactMap { $0 }.forEach {
             metalView.removeGestureRecognizer($0)
         }
         [leftEdgeGesture, rightEdgeGesture].compactMap { $0 }.forEach {
@@ -65,6 +69,12 @@ public final class GestureHandler: NSObject {
 
     private func setupGestures() {
         guard let metalView = metalView else { return }
+
+        // Single tap for remote mouse click or local focus fallback.
+        let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
+        tap.numberOfTouchesRequired = 1
+        metalView.addGestureRecognizer(tap)
+        self.tapGesture = tap
 
         // Pan for scrollback.
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
@@ -104,6 +114,41 @@ public final class GestureHandler: NSObject {
         // Scroll pan defers to edge pans near the edges.
         pan.require(toFail: leftEdge)
         pan.require(toFail: rightEdge)
+
+        // Single-finger tap should not interfere with the two-finger paste gesture.
+        tap.require(toFail: twoFingerTap)
+    }
+
+    // MARK: - Tap (Remote Mouse / Local Focus)
+
+    @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
+        guard gesture.state == .ended else { return }
+        guard let metalView = metalView, let emulator = emulator else { return }
+
+        if shouldSendRemoteMouseClick(for: emulator.state.modes), emulator.state.modes.contains(.mouseSGR) {
+            metalView.becomeFirstResponder()
+            let point = gesture.location(in: metalView)
+            let coord = metalView.gridCoordinate(for: point)
+            let x = coord.col + 1
+            let y = coord.row + 1
+            onMouseEvent?(encodeSGRMousePress(x: x, y: y))
+            onMouseEvent?(encodeSGRMouseRelease(x: x, y: y))
+            return
+        }
+
+        onLocalTap?()
+    }
+
+    private func shouldSendRemoteMouseClick(for modes: TerminalModes) -> Bool {
+        modes.contains(.mouseButton) || modes.contains(.mouseAny)
+    }
+
+    private func encodeSGRMousePress(x: Int, y: Int) -> Data {
+        Data("\u{1B}[<0;\(x);\(y)M".utf8)
+    }
+
+    private func encodeSGRMouseRelease(x: Int, y: Int) -> Data {
+        Data("\u{1B}[<3;\(x);\(y)m".utf8)
     }
 
     // MARK: - Pan (Scroll)
