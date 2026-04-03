@@ -49,6 +49,7 @@ struct TerminalUniforms {
 struct GlyphCacheKey: Hashable {
     var character: Character
     var fontName: String
+    var widthMultiplier: Int
 }
 
 /// Glyph cache entry.
@@ -226,12 +227,12 @@ public final class TerminalMetalRenderer: TerminalRenderer {
         }
     }
 
-    private func glyphInfo(for char: Character) -> GlyphInfo {
+    private func glyphInfo(for char: Character, widthMultiplier: Int = 1) -> GlyphInfo {
         guard let resolved = resolveGlyph(for: char) else {
             return GlyphInfo(textureX: 0, textureY: 0, width: 0, height: 0, bearingX: 0, bearingY: 0)
         }
 
-        let cacheKey = GlyphCacheKey(character: char, fontName: resolved.fontName)
+        let cacheKey = GlyphCacheKey(character: char, fontName: resolved.fontName, widthMultiplier: widthMultiplier)
         if let cached = glyphCache[cacheKey] {
             return cached
         }
@@ -240,7 +241,7 @@ public final class TerminalMetalRenderer: TerminalRenderer {
         CTFontGetBoundingRectsForGlyphs(resolved.scaledFont, .horizontal, [resolved.glyph], &boundingRect, 1)
 
         let scale = _scaleFactor
-        let bitmapWidth = max(Int(ceil(_cellSize.width * scale)), 1)
+        let bitmapWidth = max(Int(ceil(_cellSize.width * scale * CGFloat(widthMultiplier))), 1)
         let bitmapHeight = max(Int(ceil(_cellSize.height * scale)), 1)
 
         // Check if we need to move to the next row in the atlas.
@@ -455,17 +456,32 @@ public final class TerminalMetalRenderer: TerminalRenderer {
                 // Position in pixel coordinates (top-left origin).
                 let x0 = originX + Float(col) * cellW
                 let y0 = originY + Float(row) * cellH
-                let x1 = x0 + cellW * Float(span)
+                let backgroundX1 = x0 + cellW * Float(span)
+                let glyphX1 = backgroundX1
                 let y1 = y0 + cellH
 
                 // Normalize to clip space [-1, 1].
-                let cx0 = (x0 / viewW) * 2.0 - 1.0
-                let cy0 = 1.0 - (y0 / viewH) * 2.0
-                let cx1 = (x1 / viewW) * 2.0 - 1.0
-                let cy1 = 1.0 - (y1 / viewH) * 2.0
+                let bgCX0 = (x0 / viewW) * 2.0 - 1.0
+                let bgCY0 = 1.0 - (y0 / viewH) * 2.0
+                let bgCX1 = (backgroundX1 / viewW) * 2.0 - 1.0
+                let bgCY1 = 1.0 - (y1 / viewH) * 2.0
+
+                let glyphCX0 = (x0 / viewW) * 2.0 - 1.0
+                let glyphCY0 = 1.0 - (y0 / viewH) * 2.0
+                let glyphCX1 = (glyphX1 / viewW) * 2.0 - 1.0
+                let glyphCY1 = 1.0 - (y1 / viewH) * 2.0
+
+                // Draw background across the full occupied width.
+                let zeroUV = SIMD2<Float>(0, 0)
+                vertices.append(CellVertex(position: SIMD2(bgCX0, bgCY0), texCoord: zeroUV, fgColor: fgColor, bgColor: bgColor))
+                vertices.append(CellVertex(position: SIMD2(bgCX1, bgCY0), texCoord: zeroUV, fgColor: fgColor, bgColor: bgColor))
+                vertices.append(CellVertex(position: SIMD2(bgCX0, bgCY1), texCoord: zeroUV, fgColor: fgColor, bgColor: bgColor))
+                vertices.append(CellVertex(position: SIMD2(bgCX1, bgCY0), texCoord: zeroUV, fgColor: fgColor, bgColor: bgColor))
+                vertices.append(CellVertex(position: SIMD2(bgCX1, bgCY1), texCoord: zeroUV, fgColor: fgColor, bgColor: bgColor))
+                vertices.append(CellVertex(position: SIMD2(bgCX0, bgCY1), texCoord: zeroUV, fgColor: fgColor, bgColor: bgColor))
 
                 // Get glyph info for this character.
-                let glyph = glyphInfo(for: cell.character)
+                let glyph = glyphInfo(for: cell.character, widthMultiplier: span)
                 let atlasW = Float(atlasWidth)
                 let atlasH = Float(atlasHeight)
                 let u0 = Float(glyph.textureX) / atlasW
@@ -473,13 +489,16 @@ public final class TerminalMetalRenderer: TerminalRenderer {
                 let u1 = Float(glyph.textureX + glyph.width) / atlasW
                 let v1 = Float(glyph.textureY + glyph.height) / atlasH
 
-                // Two triangles per cell span.
-                vertices.append(CellVertex(position: SIMD2(cx0, cy0), texCoord: SIMD2(u0, v0), fgColor: fgColor, bgColor: bgColor))
-                vertices.append(CellVertex(position: SIMD2(cx1, cy0), texCoord: SIMD2(u1, v0), fgColor: fgColor, bgColor: bgColor))
-                vertices.append(CellVertex(position: SIMD2(cx0, cy1), texCoord: SIMD2(u0, v1), fgColor: fgColor, bgColor: bgColor))
-                vertices.append(CellVertex(position: SIMD2(cx1, cy0), texCoord: SIMD2(u1, v0), fgColor: fgColor, bgColor: bgColor))
-                vertices.append(CellVertex(position: SIMD2(cx1, cy1), texCoord: SIMD2(u1, v1), fgColor: fgColor, bgColor: bgColor))
-                vertices.append(CellVertex(position: SIMD2(cx0, cy1), texCoord: SIMD2(u0, v1), fgColor: fgColor, bgColor: bgColor))
+                // Match the glyph quad to the character span. For wide glyphs, the
+                // atlas entry is rasterized into a 2-cell bitmap and should be
+                // sampled across the full 2-cell quad instead of being squeezed
+                // into a single cell.
+                vertices.append(CellVertex(position: SIMD2(glyphCX0, glyphCY0), texCoord: SIMD2(u0, v0), fgColor: fgColor, bgColor: bgColor))
+                vertices.append(CellVertex(position: SIMD2(glyphCX1, glyphCY0), texCoord: SIMD2(u1, v0), fgColor: fgColor, bgColor: bgColor))
+                vertices.append(CellVertex(position: SIMD2(glyphCX0, glyphCY1), texCoord: SIMD2(u0, v1), fgColor: fgColor, bgColor: bgColor))
+                vertices.append(CellVertex(position: SIMD2(glyphCX1, glyphCY0), texCoord: SIMD2(u1, v0), fgColor: fgColor, bgColor: bgColor))
+                vertices.append(CellVertex(position: SIMD2(glyphCX1, glyphCY1), texCoord: SIMD2(u1, v1), fgColor: fgColor, bgColor: bgColor))
+                vertices.append(CellVertex(position: SIMD2(glyphCX0, glyphCY1), texCoord: SIMD2(u0, v1), fgColor: fgColor, bgColor: bgColor))
 
                 col += span
             }
