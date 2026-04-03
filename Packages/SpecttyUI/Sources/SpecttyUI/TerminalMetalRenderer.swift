@@ -45,6 +45,12 @@ struct TerminalUniforms {
     var atlasSize: SIMD2<Float>
 }
 
+/// Glyph cache key.
+struct GlyphCacheKey: Hashable {
+    var character: Character
+    var fontName: String
+}
+
 /// Glyph cache entry.
 struct GlyphInfo {
     var textureX: Int
@@ -55,6 +61,13 @@ struct GlyphInfo {
     var bearingY: Float
 }
 
+/// Resolved glyph source for a character.
+private struct ResolvedGlyph {
+    var fontName: String
+    var scaledFont: CTFont
+    var glyph: CGGlyph
+}
+
 /// Metal-based terminal renderer with glyph atlas.
 public final class TerminalMetalRenderer: TerminalRenderer {
     private let device: MTLDevice
@@ -63,7 +76,7 @@ public final class TerminalMetalRenderer: TerminalRenderer {
 
     // Glyph atlas
     private var atlasTexture: MTLTexture?
-    private var glyphCache: [Character: GlyphInfo] = [:]
+    private var glyphCache: [GlyphCacheKey: GlyphInfo] = [:]
     private var atlasNextX: Int = 0
     private var atlasNextY: Int = 0
     private var atlasRowHeight: Int = 0
@@ -73,6 +86,8 @@ public final class TerminalMetalRenderer: TerminalRenderer {
     // Font
     private var font: CTFont             // 1x font for metrics
     private var scaledFont: CTFont       // scaled font for rasterization
+    private var fallbackFontNames: [String] = []
+    private var fallbackScaledFonts: [(name: String, font: CTFont)] = []
     private var _cellSize: CGSize = .zero
     public var cellSize: CGSize { _cellSize }
     private var _scaleFactor: CGFloat = 1.0
@@ -94,6 +109,7 @@ public final class TerminalMetalRenderer: TerminalRenderer {
         self.commandQueue = device.makeCommandQueue()
         self.font = CTFontCreateWithName("Menlo" as CFString, 14, nil)
         self.scaledFont = CTFontCreateWithName("Menlo" as CFString, 14 * scaleFactor, nil)
+        rebuildFallbackFonts(for: 14)
         computeCellSize()
         buildAtlas()
         buildPipeline()
@@ -105,6 +121,7 @@ public final class TerminalMetalRenderer: TerminalRenderer {
         _scaleFactor = scale
         let size = CTFontGetSize(font)
         scaledFont = CTFontCreateWithName(CTFontCopyPostScriptName(font), size * scale, nil)
+        rebuildFallbackFonts(for: size)
         glyphCache.removeAll()
         atlasNextX = 0
         atlasNextY = 0
@@ -121,6 +138,7 @@ public final class TerminalMetalRenderer: TerminalRenderer {
         _currentFontSize = termFont.size
         self.font = CTFontCreateWithName(termFont.name as CFString, termFont.size, nil)
         self.scaledFont = CTFontCreateWithName(termFont.name as CFString, termFont.size * _scaleFactor, nil)
+        rebuildFallbackFonts(for: termFont.size)
         computeCellSize()
         glyphCache.removeAll()
         atlasNextX = 0
@@ -174,6 +192,21 @@ public final class TerminalMetalRenderer: TerminalRenderer {
         )
     }
 
+    private func rebuildFallbackFonts(for size: CGFloat) {
+        let candidates = [
+            ".PingFangSC-Regular",
+            "PingFangSC-Regular",
+            ".SFUI-Regular",
+            "Helvetica"
+        ]
+        let primaryName = String(CTFontCopyPostScriptName(font))
+
+        fallbackFontNames = candidates.filter { $0 != primaryName }
+        fallbackScaledFonts = fallbackFontNames.map {
+            ($0, CTFontCreateWithName($0 as CFString, size * _scaleFactor, nil))
+        }
+    }
+
     // MARK: - Glyph Atlas
 
     private func buildAtlas() {
@@ -194,18 +227,17 @@ public final class TerminalMetalRenderer: TerminalRenderer {
     }
 
     private func glyphInfo(for char: Character) -> GlyphInfo {
-        if let cached = glyphCache[char] {
+        guard let resolved = resolveGlyph(for: char) else {
+            return GlyphInfo(textureX: 0, textureY: 0, width: 0, height: 0, bearingX: 0, bearingY: 0)
+        }
+
+        let cacheKey = GlyphCacheKey(character: char, fontName: resolved.fontName)
+        if let cached = glyphCache[cacheKey] {
             return cached
         }
 
-        // Use the scaled font for rasterization at native pixel resolution.
-        var unichars = Array(String(char).utf16)
-        var glyphs = [CGGlyph](repeating: 0, count: unichars.count)
-        CTFontGetGlyphsForCharacters(scaledFont, &unichars, &glyphs, unichars.count)
-
-        let glyph = glyphs[0]
         var boundingRect = CGRect.zero
-        CTFontGetBoundingRectsForGlyphs(scaledFont, .horizontal, [glyph], &boundingRect, 1)
+        CTFontGetBoundingRectsForGlyphs(resolved.scaledFont, .horizontal, [resolved.glyph], &boundingRect, 1)
 
         let scale = _scaleFactor
         let bitmapWidth = max(Int(ceil(_cellSize.width * scale)), 1)
@@ -220,7 +252,7 @@ public final class TerminalMetalRenderer: TerminalRenderer {
 
         if atlasNextY + bitmapHeight > atlasHeight {
             let info = GlyphInfo(textureX: 0, textureY: 0, width: 0, height: 0, bearingX: 0, bearingY: 0)
-            glyphCache[char] = info
+            glyphCache[cacheKey] = info
             return info
         }
 
@@ -238,11 +270,11 @@ public final class TerminalMetalRenderer: TerminalRenderer {
             bitmapInfo: CGImageAlphaInfo.none.rawValue
         ) else {
             let info = GlyphInfo(textureX: 0, textureY: 0, width: 0, height: 0, bearingX: 0, bearingY: 0)
-            glyphCache[char] = info
+            glyphCache[cacheKey] = info
             return info
         }
 
-        let scaledAscent = CTFontGetAscent(scaledFont)
+        let scaledAscent = CTFontGetAscent(resolved.scaledFont)
         context.setFillColor(gray: 0, alpha: 1)
         context.fill(CGRect(x: 0, y: 0, width: bitmapWidth, height: bitmapHeight))
 
@@ -250,7 +282,7 @@ public final class TerminalMetalRenderer: TerminalRenderer {
         context.textMatrix = .identity
 
         let position = CGPoint(x: -boundingRect.origin.x, y: CGFloat(bitmapHeight) - scaledAscent)
-        CTFontDrawGlyphs(scaledFont, [glyph], [position], 1, context)
+        CTFontDrawGlyphs(resolved.scaledFont, [resolved.glyph], [position], 1, context)
 
         // Upload to atlas texture.
         let region = MTLRegion(
@@ -273,11 +305,40 @@ public final class TerminalMetalRenderer: TerminalRenderer {
             bearingY: Float(scaledAscent / scale)
         )
 
-        glyphCache[char] = info
+        glyphCache[cacheKey] = info
         atlasNextX += bitmapWidth
         atlasRowHeight = max(atlasRowHeight, bitmapHeight)
 
         return info
+    }
+
+    private func resolveGlyph(for char: Character) -> ResolvedGlyph? {
+        let utf16 = Array(String(char).utf16)
+        guard utf16.count == 1 else {
+            return resolveGlyph(from: utf16, with: String(CTFontCopyPostScriptName(scaledFont)), font: scaledFont)
+        }
+
+        if let resolved = resolveGlyph(from: utf16, with: String(CTFontCopyPostScriptName(scaledFont)), font: scaledFont) {
+            return resolved
+        }
+
+        for fallback in fallbackScaledFonts {
+            if let resolved = resolveGlyph(from: utf16, with: fallback.name, font: fallback.font) {
+                return resolved
+            }
+        }
+
+        return nil
+    }
+
+    private func resolveGlyph(from utf16: [UniChar], with fontName: String, font: CTFont) -> ResolvedGlyph? {
+        var chars = utf16
+        var glyphs = [CGGlyph](repeating: 0, count: chars.count)
+        let mapped = CTFontGetGlyphsForCharacters(font, &chars, &glyphs, chars.count)
+        guard mapped, let glyph = glyphs.first, glyph != 0 else {
+            return nil
+        }
+        return ResolvedGlyph(fontName: fontName, scaledFont: font, glyph: glyph)
     }
 
     // MARK: - Metal Pipeline
