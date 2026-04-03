@@ -429,6 +429,7 @@ public final class VTStateMachine: @unchecked Sendable {
 
     private func printChar(_ char: Character) {
         let s = screen
+        let width = cellWidth(for: char)
 
         // Auto-wrap: if we're past the right margin, wrap to next line.
         if s.cursor.col >= s.columns {
@@ -440,20 +441,65 @@ public final class VTStateMachine: @unchecked Sendable {
             }
         }
 
-        // Write the cell.
+        if width == 2 && s.cursor.col == s.columns - 1 && terminalState.modes.contains(.autoWrap) {
+            s.cursor.col = 0
+            lineFeed()
+        }
+
+        // Write the cell(s).
         let row = s.cursor.row
         let col = s.cursor.col
-        if row >= 0 && row < s.rows && col >= 0 && col < s.columns {
+        guard row >= 0 && row < s.rows && col >= 0 && col < s.columns else { return }
+
+        if width == 2 && col + 1 >= s.columns {
+            return
+        }
+
+        clearWidePairIfNeeded(row: row, col: col)
+        if width == 2 {
+            clearWidePairIfNeeded(row: row, col: col + 1)
+        }
+
+        if terminalState.modes.contains(.insertMode) {
+            insertChars(width)
+        }
+
+        if width == 2 {
+            var headAttributes = s.currentAttributes
+            headAttributes.remove(.wideCharTail)
+            headAttributes.insert(.wideChar)
+
+            var tailAttributes = s.currentAttributes
+            tailAttributes.remove(.wideChar)
+            tailAttributes.insert(.wideCharTail)
+
             s.lines[row].cells[col] = TerminalCell(
                 character: char,
                 fg: s.currentFG,
                 bg: s.currentBG,
-                attributes: s.currentAttributes
+                attributes: headAttributes
             )
-            s.lines[row].isDirty = true
+            s.lines[row].cells[col + 1] = TerminalCell(
+                character: " ",
+                fg: s.currentFG,
+                bg: s.currentBG,
+                attributes: tailAttributes
+            )
+            s.cursor.col += 2
+        } else {
+            var attributes = s.currentAttributes
+            attributes.remove(.wideChar)
+            attributes.remove(.wideCharTail)
+            s.lines[row].cells[col] = TerminalCell(
+                character: char,
+                fg: s.currentFG,
+                bg: s.currentBG,
+                attributes: attributes
+            )
+            s.cursor.col += 1
         }
 
-        s.cursor.col += 1
+        s.lines[row].isDirty = true
     }
 
     // MARK: - Line Operations
@@ -506,6 +552,63 @@ public final class VTStateMachine: @unchecked Sendable {
             scrollDown()
         } else if s.cursor.row > 0 {
             s.cursor.row -= 1
+        }
+    }
+
+    private func cellWidth(for char: Character) -> Int {
+        guard let scalar = char.unicodeScalars.first, char.unicodeScalars.count == 1 else { return 1 }
+        switch scalar.value {
+        case 0x1100...0x115F,
+             0x2329...0x232A,
+             0x2E80...0xA4CF,
+             0xAC00...0xD7A3,
+             0xF900...0xFAFF,
+             0xFE10...0xFE19,
+             0xFE30...0xFE6F,
+             0xFF00...0xFF60,
+             0xFFE0...0xFFE6:
+            return 2
+        default:
+            return 1
+        }
+    }
+
+    private func clearWidePairIfNeeded(row: Int, col: Int) {
+        guard row >= 0 && row < screen.rows else { return }
+        guard col >= 0 && col < screen.columns else { return }
+
+        let line = screen.lines[row]
+        if line.cells[col].isWideHead {
+            screen.lines[row].cells[col] = .blank
+            if col + 1 < screen.columns {
+                screen.lines[row].cells[col + 1] = .blank
+            }
+            return
+        }
+
+        if line.cells[col].isWideTail {
+            screen.lines[row].cells[col] = .blank
+            if col > 0 {
+                screen.lines[row].cells[col - 1] = .blank
+            }
+        }
+    }
+
+    private func normalizedCursorColumn() -> Int {
+        let s = screen
+        guard s.cursor.row >= 0 && s.cursor.row < s.rows else { return s.cursor.col }
+        guard s.cursor.col >= 0 && s.cursor.col < s.columns else { return s.cursor.col }
+        if s.lines[s.cursor.row].cells[s.cursor.col].isWideTail {
+            return max(0, s.cursor.col - 1)
+        }
+        return s.cursor.col
+    }
+
+    private func normalizeWideCharacters(in row: Int) {
+        guard row >= 0 && row < screen.rows else { return }
+        screen.lines[row].normalizeWideCharacters()
+        if screen.cursor.row == row {
+            screen.cursor.col = normalizedCursorColumn()
         }
     }
 
@@ -958,9 +1061,11 @@ public final class VTStateMachine: @unchecked Sendable {
                 s.lines[row] = TerminalLine(columns: s.columns)
             }
             // Current line from start to cursor
-            for col in 0...min(s.cursor.col, s.columns - 1) {
-                s.lines[s.cursor.row].cells[col] = .blank
+            let endCol = min(normalizedCursorColumn(), s.columns - 1)
+            for col in 0...endCol {
+                clearWidePairIfNeeded(row: s.cursor.row, col: col)
             }
+            normalizeWideCharacters(in: s.cursor.row)
             s.lines[s.cursor.row].isDirty = true
         case 2: // Erase entire display
             for row in 0..<s.rows {
@@ -979,18 +1084,21 @@ public final class VTStateMachine: @unchecked Sendable {
         guard row >= 0 && row < s.rows else { return }
         switch mode {
         case 0: // Cursor to end of line
-            for col in s.cursor.col..<s.columns {
-                s.lines[row].cells[col] = .blank
+            let start = normalizedCursorColumn()
+            for col in start..<s.columns {
+                clearWidePairIfNeeded(row: row, col: col)
             }
         case 1: // Start of line to cursor
-            for col in 0...min(s.cursor.col, s.columns - 1) {
-                s.lines[row].cells[col] = .blank
+            let end = min(normalizedCursorColumn(), s.columns - 1)
+            for col in 0...end {
+                clearWidePairIfNeeded(row: row, col: col)
             }
         case 2: // Entire line
             s.lines[row] = TerminalLine(columns: s.columns)
         default:
             break
         }
+        normalizeWideCharacters(in: row)
         s.lines[row].isDirty = true
     }
 
@@ -1029,9 +1137,15 @@ public final class VTStateMachine: @unchecked Sendable {
         let s = screen
         let row = s.cursor.row
         guard row >= 0 && row < s.rows else { return }
-        let n = min(count, s.columns - s.cursor.col)
-        s.lines[row].cells.removeSubrange(s.cursor.col..<(s.cursor.col + n))
+        let start = normalizedCursorColumn()
+        let n = min(count, s.columns - start)
+        let end = min(start + n, s.columns)
+        for col in start..<end {
+            clearWidePairIfNeeded(row: row, col: col)
+        }
+        s.lines[row].cells.removeSubrange(start..<end)
         s.lines[row].cells.append(contentsOf: Array(repeating: TerminalCell.blank, count: n))
+        normalizeWideCharacters(in: row)
         s.lines[row].isDirty = true
     }
 
@@ -1039,10 +1153,13 @@ public final class VTStateMachine: @unchecked Sendable {
         let s = screen
         let row = s.cursor.row
         guard row >= 0 && row < s.rows else { return }
-        let n = min(count, s.columns - s.cursor.col)
+        let start = normalizedCursorColumn()
+        let n = min(count, s.columns - start)
+        clearWidePairIfNeeded(row: row, col: start)
         let blanks = Array(repeating: TerminalCell.blank, count: n)
-        s.lines[row].cells.insert(contentsOf: blanks, at: s.cursor.col)
+        s.lines[row].cells.insert(contentsOf: blanks, at: start)
         s.lines[row].cells.removeLast(n)
+        normalizeWideCharacters(in: row)
         s.lines[row].isDirty = true
     }
 
@@ -1050,10 +1167,12 @@ public final class VTStateMachine: @unchecked Sendable {
         let s = screen
         let row = s.cursor.row
         guard row >= 0 && row < s.rows else { return }
-        let end = min(s.cursor.col + count, s.columns)
-        for col in s.cursor.col..<end {
-            s.lines[row].cells[col] = .blank
+        let start = normalizedCursorColumn()
+        let end = min(start + count, s.columns)
+        for col in start..<end {
+            clearWidePairIfNeeded(row: row, col: col)
         }
+        normalizeWideCharacters(in: row)
         s.lines[row].isDirty = true
     }
 

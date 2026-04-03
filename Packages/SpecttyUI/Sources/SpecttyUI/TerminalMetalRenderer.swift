@@ -394,7 +394,6 @@ public final class TerminalMetalRenderer: TerminalRenderer {
         let originY = Float(contentRect.minY)
 
         for row in 0..<state.rows {
-            let lineIndex: Int
             let line: TerminalLine
 
             if scrollOffset > 0 {
@@ -419,8 +418,15 @@ public final class TerminalMetalRenderer: TerminalRenderer {
                 line = state.lines[row]
             }
 
-            for col in 0..<min(state.columns, line.cells.count) {
+            var col = 0
+            while col < min(state.columns, line.cells.count) {
                 let cell = line.cells[col]
+                if cell.isWideTail {
+                    col += 1
+                    continue
+                }
+
+                let span = cell.isWideHead ? 2 : 1
 
                 // Resolve colors using theme palette.
                 let isInverse = cell.attributes.contains(.inverse)
@@ -449,7 +455,7 @@ public final class TerminalMetalRenderer: TerminalRenderer {
                 // Position in pixel coordinates (top-left origin).
                 let x0 = originX + Float(col) * cellW
                 let y0 = originY + Float(row) * cellH
-                let x1 = x0 + cellW
+                let x1 = x0 + cellW * Float(span)
                 let y1 = y0 + cellH
 
                 // Normalize to clip space [-1, 1].
@@ -467,23 +473,29 @@ public final class TerminalMetalRenderer: TerminalRenderer {
                 let u1 = Float(glyph.textureX + glyph.width) / atlasW
                 let v1 = Float(glyph.textureY + glyph.height) / atlasH
 
-                // Two triangles per cell.
-                // Triangle 1: top-left, top-right, bottom-left
+                // Two triangles per cell span.
                 vertices.append(CellVertex(position: SIMD2(cx0, cy0), texCoord: SIMD2(u0, v0), fgColor: fgColor, bgColor: bgColor))
                 vertices.append(CellVertex(position: SIMD2(cx1, cy0), texCoord: SIMD2(u1, v0), fgColor: fgColor, bgColor: bgColor))
                 vertices.append(CellVertex(position: SIMD2(cx0, cy1), texCoord: SIMD2(u0, v1), fgColor: fgColor, bgColor: bgColor))
-                // Triangle 2: top-right, bottom-right, bottom-left
                 vertices.append(CellVertex(position: SIMD2(cx1, cy0), texCoord: SIMD2(u1, v0), fgColor: fgColor, bgColor: bgColor))
                 vertices.append(CellVertex(position: SIMD2(cx1, cy1), texCoord: SIMD2(u1, v1), fgColor: fgColor, bgColor: bgColor))
                 vertices.append(CellVertex(position: SIMD2(cx0, cy1), texCoord: SIMD2(u0, v1), fgColor: fgColor, bgColor: bgColor))
+
+                col += span
             }
         }
 
         // Cursor rendering.
         if scrollOffset == 0 && state.cursor.visible {
             let cursorRow = state.cursor.row
-            let cursorCol = state.cursor.col
+            var cursorCol = state.cursor.col
             if cursorRow >= 0 && cursorRow < state.rows && cursorCol >= 0 && cursorCol < state.columns {
+                let line = state.lines[cursorRow]
+                if cursorCol < line.cells.count, line.cells[cursorCol].isWideTail {
+                    cursorCol -= 1
+                }
+                let cursorCell = line.cells[cursorCol]
+                let cursorSpan = cursorCell.isWideHead ? 2 : 1
                 let x0 = originX + Float(cursorCol) * cellW
                 let y0 = originY + Float(cursorRow) * cellH
 
@@ -497,13 +509,13 @@ public final class TerminalMetalRenderer: TerminalRenderer {
                 case .block:
                     cursorX0 = x0
                     cursorY0 = y0
-                    cursorX1 = x0 + cellW
+                    cursorX1 = x0 + cellW * Float(cursorSpan)
                     cursorY1 = y0 + cellH
                 case .underline:
                     let thickness = max(cellH * 0.1, 2.0)
                     cursorX0 = x0
                     cursorY0 = y0 + cellH - thickness
-                    cursorX1 = x0 + cellW
+                    cursorX1 = x0 + cellW * Float(cursorSpan)
                     cursorY1 = y0 + cellH
                 case .bar:
                     let thickness = max(cellW * 0.12, 2.0)

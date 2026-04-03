@@ -203,12 +203,17 @@ public final class GestureHandler: NSObject {
     // MARK: - Long Press (Selection)
 
     @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
-        guard let metalView = metalView else { return }
+        guard let metalView = metalView, let emulator = emulator else { return }
 
         let point = gesture.location(in: metalView)
         let coord = metalView.gridCoordinate(for: point)
         let row = coord.row
-        let col = coord.col
+        var col = coord.col
+        if col > 0, row >= 0, row < emulator.state.rows,
+           col < emulator.state.activeScreen.lines[row].cells.count,
+           emulator.state.activeScreen.lines[row].cells[col].isWideTail {
+            col -= 1
+        }
 
         switch gesture.state {
         case .began:
