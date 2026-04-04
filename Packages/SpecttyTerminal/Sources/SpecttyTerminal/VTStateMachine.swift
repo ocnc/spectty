@@ -594,6 +594,14 @@ public final class VTStateMachine: @unchecked Sendable {
         }
     }
 
+    private func eraseCell(row: Int, col: Int) {
+        guard row >= 0 && row < screen.rows else { return }
+        guard col >= 0 && col < screen.columns else { return }
+
+        clearWidePairIfNeeded(row: row, col: col)
+        screen.lines[row].cells[col] = .blank
+    }
+
     private func normalizedCursorColumn() -> Int {
         let s = screen
         guard s.cursor.row >= 0 && s.cursor.row < s.rows else { return s.cursor.col }
@@ -1063,7 +1071,7 @@ public final class VTStateMachine: @unchecked Sendable {
             // Current line from start to cursor
             let endCol = min(normalizedCursorColumn(), s.columns - 1)
             for col in 0...endCol {
-                clearWidePairIfNeeded(row: s.cursor.row, col: col)
+                eraseCell(row: s.cursor.row, col: col)
             }
             normalizeWideCharacters(in: s.cursor.row)
             s.lines[s.cursor.row].isDirty = true
@@ -1086,12 +1094,12 @@ public final class VTStateMachine: @unchecked Sendable {
         case 0: // Cursor to end of line
             let start = normalizedCursorColumn()
             for col in start..<s.columns {
-                clearWidePairIfNeeded(row: row, col: col)
+                eraseCell(row: row, col: col)
             }
         case 1: // Start of line to cursor
             let end = min(normalizedCursorColumn(), s.columns - 1)
             for col in 0...end {
-                clearWidePairIfNeeded(row: row, col: col)
+                eraseCell(row: row, col: col)
             }
         case 2: // Entire line
             s.lines[row] = TerminalLine(columns: s.columns)
@@ -1170,7 +1178,7 @@ public final class VTStateMachine: @unchecked Sendable {
         let start = normalizedCursorColumn()
         let end = min(start + count, s.columns)
         for col in start..<end {
-            clearWidePairIfNeeded(row: row, col: col)
+            eraseCell(row: row, col: col)
         }
         normalizeWideCharacters(in: row)
         s.lines[row].isDirty = true
