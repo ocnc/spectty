@@ -18,6 +18,8 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
         }
         return bar
     }()
+    private var pendingDisplayWorkItem: DispatchWorkItem?
+    private var lastDisplayTime: CFTimeInterval = 0
 
     /// Callback for when the view is resized and a new grid size is computed.
     public var onResize: ((Int, Int) -> Void)?
@@ -54,6 +56,7 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
 
     /// Visual bell flash layer.
     private var bellLayer: CALayer?
+    private static let minimumDisplayInterval: CFTimeInterval = 1.0 / 10
 
     public init(frame: CGRect, emulator: any TerminalEmulator) {
         guard let device = MTLCreateSystemDefaultDevice() else {
@@ -75,12 +78,12 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
     private func configure() {
         self.colorPixelFormat = .bgra8Unorm
         self.clearColor = MTLClearColor(red: 0.118, green: 0.118, blue: 0.118, alpha: 1.0)
-        self.isPaused = false
-        self.enableSetNeedsDisplay = false
-        self.preferredFramesPerSecond = 60
+        self.isPaused = true
+        self.enableSetNeedsDisplay = true
         self.delegate = self
         self.isMultipleTouchEnabled = true
         self.isUserInteractionEnabled = true
+        installDisplayChangeHandler(for: terminalEmulator)
 
         // Selection overlay — hit tests only near drag handles, passes through otherwise.
         selectionView.frame = bounds
@@ -116,10 +119,12 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
 
     @objc private func appDidEnterBackground() {
         isPaused = true
+        pendingDisplayWorkItem?.cancel()
+        pendingDisplayWorkItem = nil
     }
 
     @objc private func appWillEnterForeground() {
-        isPaused = false
+        requestDisplay()
     }
 
     @objc private func handleTap() {
@@ -140,13 +145,56 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
     /// Swap the terminal emulator without recreating the view.
     /// Preserves first-responder status (keyboard stays up).
     public func setEmulator(_ emulator: any TerminalEmulator) {
+        installDisplayChangeHandler(for: nil)
         self.terminalEmulator = emulator
+        installDisplayChangeHandler(for: emulator)
         self.scrollOffset = 0
         gestureHandler?.removeGestures()
         setupGestureHandler(emulator: emulator)
         // Reset so the new emulator gets the current grid size.
         lastReportedGridSize = (0, 0)
         notifyResizeIfNeeded()
+        requestDisplay()
+    }
+
+    private func installDisplayChangeHandler(for emulator: (any TerminalEmulator)?) {
+        emulator?.onDisplayChange = { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.requestDisplay()
+            }
+        }
+    }
+
+    private func requestDisplay() {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            guard self.window != nil else { return }
+            let now = CACurrentMediaTime()
+            let earliestNextDisplay = self.lastDisplayTime + Self.minimumDisplayInterval
+
+            if now >= earliestNextDisplay {
+                self.pendingDisplayWorkItem?.cancel()
+                self.pendingDisplayWorkItem = nil
+                self.lastDisplayTime = now
+                self.setNeedsDisplay()
+                return
+            }
+
+            guard self.pendingDisplayWorkItem == nil else { return }
+
+            let work = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                self.pendingDisplayWorkItem = nil
+                guard self.window != nil else { return }
+                self.lastDisplayTime = CACurrentMediaTime()
+                self.setNeedsDisplay()
+            }
+            self.pendingDisplayWorkItem = work
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + (earliestNextDisplay - now),
+                execute: work
+            )
+        }
     }
 
     private func setupGestureHandler(emulator: any TerminalEmulator) {
@@ -397,6 +445,7 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
         self.terminalFont = font
         renderer?.setFont(font)
         notifyResizeIfNeeded()
+        requestDisplay()
     }
 
     public func setTheme(_ theme: TerminalTheme) {
@@ -408,10 +457,12 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
             blue: Double(theme.background.2) / 255.0,
             alpha: 1.0
         )
+        requestDisplay()
     }
 
     public func setCursorStyle(_ style: CursorStyle) {
         renderer?.setCursorStyle(style)
+        requestDisplay()
     }
 
     // MARK: - Scrollback
