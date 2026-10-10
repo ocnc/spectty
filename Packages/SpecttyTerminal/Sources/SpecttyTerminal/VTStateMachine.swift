@@ -455,13 +455,12 @@ public final class VTStateMachine: @unchecked Sendable {
             return
         }
 
+        if terminalState.modes.contains(.insertMode) {
+            insertChars(width)
+        }
         clearWidePairIfNeeded(row: row, col: col)
         if width == 2 {
             clearWidePairIfNeeded(row: row, col: col + 1)
-        }
-
-        if terminalState.modes.contains(.insertMode) {
-            insertChars(width)
         }
 
         if width == 2 {
@@ -555,6 +554,7 @@ public final class VTStateMachine: @unchecked Sendable {
         }
     }
 
+    // shortcut: common single-scalar CJK only; use Unicode width tables for full grapheme support.
     private func cellWidth(for char: Character) -> Int {
         guard let scalar = char.unicodeScalars.first, char.unicodeScalars.count == 1 else { return 1 }
         switch scalar.value {
@@ -1161,9 +1161,12 @@ public final class VTStateMachine: @unchecked Sendable {
         let s = screen
         let row = s.cursor.row
         guard row >= 0 && row < s.rows else { return }
-        let start = normalizedCursorColumn()
+        let start = s.cursor.col
         let n = min(count, s.columns - start)
-        clearWidePairIfNeeded(row: row, col: start)
+        // Only split pairs are erased; an intact head shifts with its tail.
+        if start < s.columns, s.lines[row].cells[start].isWideTail {
+            clearWidePairIfNeeded(row: row, col: start)
+        }
         let blanks = Array(repeating: TerminalCell.blank, count: n)
         s.lines[row].cells.insert(contentsOf: blanks, at: start)
         s.lines[row].cells.removeLast(n)
