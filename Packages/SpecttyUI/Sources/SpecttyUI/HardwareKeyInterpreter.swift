@@ -95,4 +95,3 @@ enum HardwareKeyInterpreter {
         !value.canBeConverted(to: .ascii)
     }
 }
-

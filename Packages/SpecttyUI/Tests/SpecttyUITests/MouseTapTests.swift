@@ -8,6 +8,14 @@ final class MouseTapTests: XCTestCase {
         guard MTLCreateSystemDefaultDevice() != nil else { throw XCTSkip("Metal unavailable") }
         let emulator = GhosttyTerminalEmulator(columns: 80, rows: 24)
         let view = TerminalMetalView(frame: CGRect(x: 0, y: 0, width: 400, height: 300), emulator: emulator)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 1200, height: 1000))
+        let controller = UIViewController()
+        window.rootViewController = controller
+        controller.view.addSubview(view)
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        view.setNeedsLayout()
+        view.layoutIfNeeded()
         let handler = GestureHandler(metalView: view, emulator: emulator)
         var sent = [Data]()
         var localTaps = 0

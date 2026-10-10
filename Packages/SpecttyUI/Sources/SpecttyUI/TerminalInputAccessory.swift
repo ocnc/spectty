@@ -1,20 +1,29 @@
 import UIKit
 import SpecttyTerminal
 
-/// Input accessory bar providing Esc, Tab, Ctrl, Alt, arrow keys, and other
-/// common terminal keys above the iOS software keyboard.
+/// Two-row input accessory providing common terminal keys above the iOS
+/// software keyboard.
 public final class TerminalInputAccessory: UIInputView {
     /// Callback when a virtual key is pressed.
     public var onKeyPress: ((KeyEvent) -> Void)?
+    /// Callback when the software keyboard should be shown or hidden.
+    public var onKeyboardToggle: (() -> Void)?
 
     /// Whether Ctrl modifier is active (toggleable).
     public private(set) var ctrlActive = false
     /// Whether Shift modifier is active (toggleable).
     public private(set) var shiftActive = false
+    /// Whether the software keyboard is currently visible.
+    public var softwareKeyboardVisible = true {
+        didSet {
+            updateKeyboardToggleButton()
+        }
+    }
 
     private let stackView = UIStackView()
     private var ctrlButton: UIButton?
     private var shiftButton: UIButton?
+    private var keyboardToggleButton: UIButton?
     private let haptic = UIImpactFeedbackGenerator(style: .rigid)
 
     public init(frame: CGRect) {
@@ -30,14 +39,14 @@ public final class TerminalInputAccessory: UIInputView {
     private func setup() {
         allowsSelfSizing = true
 
-        stackView.axis = .horizontal
-        stackView.spacing = 5
+        stackView.axis = .vertical
+        stackView.spacing = 4
         stackView.alignment = .fill
         stackView.distribution = .fillEqually
         stackView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stackView)
 
-        let heightConstraint = heightAnchor.constraint(equalToConstant: 44)
+        let heightConstraint = heightAnchor.constraint(equalToConstant: 100)
         heightConstraint.priority = .defaultHigh
 
         NSLayoutConstraint.activate([
@@ -48,8 +57,7 @@ public final class TerminalInputAccessory: UIInputView {
             stackView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
         ])
 
-        // Build the key buttons — optimized for CLI coding (Claude Code / Codex).
-        let keys: [(String, KeyButtonAction)] = [
+        let firstRowKeys: [(String, KeyButtonAction)] = [
             ("Esc", .escape),
             ("Tab", .tab),
             ("Ctrl", .toggleCtrl),
@@ -59,18 +67,20 @@ public final class TerminalInputAccessory: UIInputView {
             ("\u{2191}", .arrowUp),     // ↑
             ("\u{2192}", .arrowRight),  // →
         ]
+        addRow(firstRowKeys)
 
-        for (title, action) in keys {
-            let button = makeButton(title: title, action: action)
-            stackView.addArrangedSubview(button)
-
-            if case .toggleCtrl = action { ctrlButton = button }
-            if case .toggleShift = action { shiftButton = button }
-        }
+        let secondRowKeys: [(String, KeyButtonAction)] = [
+            ("Del", .deleteForward),
+            ("PgUp", .pageUp),
+            ("PgDn", .pageDown),
+            ("Hide KB", .toggleSoftwareKeyboard),
+        ]
+        addRow(secondRowKeys)
+        updateKeyboardToggleButton()
     }
 
     public override var intrinsicContentSize: CGSize {
-        CGSize(width: UIView.noIntrinsicMetric, height: 44)
+        CGSize(width: UIView.noIntrinsicMetric, height: 100)
     }
 
     // MARK: - Button Factory
@@ -78,12 +88,35 @@ public final class TerminalInputAccessory: UIInputView {
     private enum KeyButtonAction {
         case escape
         case tab
+        case deleteForward
+        case pageUp
+        case pageDown
         case toggleCtrl
         case toggleShift
+        case toggleSoftwareKeyboard
         case arrowUp
         case arrowDown
         case arrowLeft
         case arrowRight
+    }
+
+    private func addRow(_ keys: [(String, KeyButtonAction)]) {
+        let row = UIStackView()
+        row.axis = .horizontal
+        row.spacing = 5
+        row.alignment = .fill
+        row.distribution = .fillEqually
+
+        for (title, action) in keys {
+            let button = makeButton(title: title, action: action)
+            row.addArrangedSubview(button)
+
+            if case .toggleCtrl = action { ctrlButton = button }
+            if case .toggleShift = action { shiftButton = button }
+            if case .toggleSoftwareKeyboard = action { keyboardToggleButton = button }
+        }
+
+        stackView.addArrangedSubview(row)
     }
 
     private func makeButton(title: String, action: KeyButtonAction) -> UIButton {
@@ -100,6 +133,18 @@ public final class TerminalInputAccessory: UIInputView {
         }
 
         let button = UIButton(configuration: config)
+        switch action {
+        case .escape: button.accessibilityLabel = "Escape"
+        case .deleteForward: button.accessibilityLabel = "Delete forward"
+        case .pageUp: button.accessibilityLabel = "Page up"
+        case .pageDown: button.accessibilityLabel = "Page down"
+        case .arrowUp: button.accessibilityLabel = "Up arrow"
+        case .arrowDown: button.accessibilityLabel = "Down arrow"
+        case .arrowLeft: button.accessibilityLabel = "Left arrow"
+        case .arrowRight: button.accessibilityLabel = "Right arrow"
+        case .toggleCtrl: button.accessibilityLabel = "Control"
+        default: button.accessibilityLabel = title
+        }
         let handler = UIAction { [weak self] _ in
             self?.handleAction(action)
         }
@@ -124,12 +169,24 @@ public final class TerminalInputAccessory: UIInputView {
         case .tab:
             sendKey(keyCode: 0x2B, characters: "\t", modifiers: modifiers)
             deactivateModifiers()
+        case .deleteForward:
+            sendKey(keyCode: 0x4C, characters: "", modifiers: modifiers)
+            deactivateModifiers()
+        case .pageUp:
+            sendKey(keyCode: 0x4B, characters: "", modifiers: modifiers)
+            deactivateModifiers()
+        case .pageDown:
+            sendKey(keyCode: 0x4E, characters: "", modifiers: modifiers)
+            deactivateModifiers()
         case .toggleCtrl:
             ctrlActive.toggle()
             updateModifierButtons()
         case .toggleShift:
             shiftActive.toggle()
             updateModifierButtons()
+        case .toggleSoftwareKeyboard:
+            deactivateModifiers()
+            onKeyboardToggle?()
         case .arrowUp:
             sendKey(keyCode: 0x52, characters: "", modifiers: modifiers)
             deactivateModifiers()
@@ -166,8 +223,18 @@ public final class TerminalInputAccessory: UIInputView {
         updateButtonHighlight(shiftButton, active: shiftActive)
     }
 
+    private func updateKeyboardToggleButton() {
+        guard let keyboardToggleButton else { return }
+        var config = keyboardToggleButton.configuration ?? .filled()
+        config.title = softwareKeyboardVisible ? "Hide KB" : "Show KB"
+        keyboardToggleButton.configuration = config
+        keyboardToggleButton.accessibilityLabel = softwareKeyboardVisible ? "Hide keyboard" : "Show keyboard"
+    }
+
     private func updateButtonHighlight(_ button: UIButton?, active: Bool) {
         guard let button else { return }
+        button.accessibilityValue = active ? "On" : "Off"
+        if active { button.accessibilityTraits.insert(.selected) } else { button.accessibilityTraits.remove(.selected) }
         var config = button.configuration ?? .filled()
         config.baseBackgroundColor = active
             ? .systemBlue

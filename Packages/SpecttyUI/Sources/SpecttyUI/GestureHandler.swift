@@ -14,7 +14,7 @@ public struct EdgeSwipeEvent {
 
 /// Handles gestures on the terminal view: scroll, pinch-to-zoom, selection.
 @MainActor
-public final class GestureHandler: NSObject {
+public final class GestureHandler: NSObject, UIGestureRecognizerDelegate {
     private weak var metalView: TerminalMetalView?
     private weak var emulator: (any TerminalEmulator)?
 
@@ -117,6 +117,18 @@ public final class GestureHandler: NSObject {
 
         // Single-finger tap should not interfere with the two-finger paste gesture.
         tap.require(toFail: twoFingerTap)
+        for gesture in [tap, pan, pinch, longPress, twoFingerTap, leftEdge, rightEdge] {
+            gesture.delegate = self
+        }
+    }
+
+    public func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        var view = touch.view
+        while let current = view {
+            if current is UIControl || current is TerminalInputAccessory { return false }
+            view = current.superview
+        }
+        return true
     }
 
     // MARK: - Tap (Remote Mouse / Local Focus)

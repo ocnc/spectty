@@ -36,6 +36,8 @@ final class TerminalIMETextField: UITextField {
         if !remaining.isEmpty { super.pressesCancelled(remaining, with: event) }
     }
 
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool { false }
+
     override func paste(_ sender: Any?) { onPaste?() }
     override func copy(_ sender: Any?) { onCopy?() }
 }
@@ -56,7 +58,7 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
     var isShowingLiveScreen: Bool { inputEnabled && scrollOffset == 0 && selectionView.selection == nil }
     private let feedbackGenerator = UIImpactFeedbackGenerator(style: .light)
     private lazy var _inputAccessory: TerminalInputAccessory = {
-        let bar = TerminalInputAccessory(frame: CGRect(x: 0, y: 0, width: bounds.width, height: 44))
+        let bar = TerminalInputAccessory(frame: CGRect(x: 0, y: 0, width: bounds.width, height: 100))
         bar.autoresizingMask = .flexibleWidth
         bar.onKeyPress = { [weak self] event in
             guard let self, self.inputEnabled else { return }
@@ -66,6 +68,10 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
             } else {
                 self.onKeyInput?(event)
             }
+        }
+        bar.onKeyboardToggle = { [weak self] in
+            guard let self else { return }
+            if self.isFirstResponder { self.resignFirstResponder() } else { self.becomeFirstResponder() }
         }
         return bar
     }()
@@ -149,7 +155,7 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
         imeTextField.textColor = .clear
         imeTextField.tintColor = .clear
         imeTextField.backgroundColor = .clear
-        imeTextField.accessoryProvider = { [weak self] in self?._inputAccessory }
+        imeTextField.accessoryProvider = { nil }
         imeTextField.emptyDeleteHandler = { [weak self] in self?.deleteBackward() }
         imeTextField.routePresses = { [weak self] presses, event, down in
             self?.routeHardwarePresses(presses, with: event, isKeyDown: down) ?? presses
@@ -167,6 +173,17 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
         selectionView.contentInsets = terminalContentInsets
         selectionView.cellSize = cellSize
         addSubview(selectionView)
+        addSubview(_inputAccessory)
+        _inputAccessory.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            _inputAccessory.leadingAnchor.constraint(equalTo: leadingAnchor),
+            _inputAccessory.trailingAnchor.constraint(equalTo: trailingAnchor),
+            _inputAccessory.bottomAnchor.constraint(equalTo: keyboardLayoutGuide.topAnchor),
+            _inputAccessory.heightAnchor.constraint(equalToConstant: 100)
+        ])
+        for name in [UIResponder.keyboardWillShowNotification, UIResponder.keyboardWillHideNotification, UIResponder.keyboardWillChangeFrameNotification] {
+            NotificationCenter.default.addObserver(self, selector: #selector(keyboardChanged), name: name, object: nil)
+        }
 
         // Edit menu interaction for copy/paste — nil delegate uses default
         // behavior, building the menu from canPerformAction/copy/paste.
@@ -308,7 +325,17 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
 
     public override var canBecomeFirstResponder: Bool { true }
 
-    public override var inputAccessoryView: UIView? { _inputAccessory }
+    public override var inputAccessoryView: UIView? { nil }
+
+    @objc private func keyboardChanged() {
+        setNeedsLayout()
+    }
+
+    private func updateInputAccessory() {
+        _inputAccessory.isHidden = UITextInputContext.current()?.isHardwareKeyboardInputExpected ?? false
+        _inputAccessory.softwareKeyboardVisible = isFirstResponder && keyboardLayoutGuide.layoutFrame.height > safeAreaInsets.bottom + 1
+    }
+
 
     public override var isFirstResponder: Bool { imeTextField.isFirstResponder }
 
@@ -638,7 +665,11 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
 
     /// Drawable content rect after applying terminal insets.
     var terminalContentRect: CGRect {
-        let rect = bounds.inset(by: terminalContentInsets)
+        var rect = bounds.inset(by: terminalContentInsets)
+        if !_inputAccessory.isHidden {
+            let barTop = _inputAccessory.frame.isEmpty || _inputAccessory.frame.maxY <= bounds.minY ? bounds.maxY - safeAreaInsets.bottom - 100 : _inputAccessory.frame.minY
+            rect.size.height = max(0, min(rect.maxY, barTop - 4) - rect.minY)
+        }
         guard rect.width > 0, rect.height > 0 else { return .zero }
         return rect
     }
@@ -701,6 +732,7 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
 
     public override func layoutSubviews() {
         super.layoutSubviews()
+        updateInputAccessory()
         selectionView.frame = bounds
         selectionView.contentInsets = terminalContentInsets
         selectionView.cellSize = cellSize
@@ -712,6 +744,7 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
 
     public override func didMoveToWindow() {
         super.didMoveToWindow()
+        setNeedsLayout()
         requestDisplay()
     }
 
