@@ -39,6 +39,9 @@ public protocol TerminalEmulator: AnyObject, Sendable {
     /// Number of lines in scrollback.
     var scrollbackCount: Int { get }
 
+    /// Called after the visible terminal content changes and a redraw is needed.
+    var onDisplayChange: (@Sendable () -> Void)? { get set }
+
     /// Feed raw bytes from the transport into the terminal.
     func feed(_ data: Data)
 

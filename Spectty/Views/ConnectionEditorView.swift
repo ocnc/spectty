@@ -8,6 +8,7 @@ struct ConnectionEditorView: View {
     let onSave: (ServerConnection) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var showMoshAdvanced = false
+    @State private var portText: String?
 
     @State private var keyValidationError: String?
     @State private var derivedPublicKey: String?
@@ -26,7 +27,10 @@ struct ConnectionEditorView: View {
                     HStack {
                         Text("Port")
                         Spacer()
-                        TextField("22", value: $connection.port, format: .number)
+                        TextField("22", text: Binding(
+                            get: { portText ?? String(connection.port) },
+                            set: { portText = $0 }
+                        ))
                             .keyboardType(.numberPad)
                             .multilineTextAlignment(.trailing)
                             .frame(width: 80)
@@ -185,6 +189,8 @@ struct ConnectionEditorView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
+                        guard let port = Self.parsePort(portText ?? String(connection.port)) else { return }
+                        connection.port = port
                         Task {
                             await saveCredentialsToKeychain()
                             onSave(connection)
@@ -200,8 +206,15 @@ struct ConnectionEditorView: View {
         }
     }
 
+    static func parsePort(_ text: String) -> Int? {
+        guard !text.isEmpty, text.utf8.allSatisfy({ (48...57).contains($0) }),
+              let port = Int(text), (1...65_535).contains(port) else { return nil }
+        return port
+    }
+
     private var isSaveEnabled: Bool {
-        guard !connection.host.isEmpty, !connection.username.isEmpty else { return false }
+        guard !connection.host.isEmpty, !connection.username.isEmpty,
+              Self.parsePort(portText ?? String(connection.port)) != nil else { return false }
         if connection.authMethod == .publicKey {
             // Allow save if a key is already in Keychain or a new valid key was pasted.
             return hasExistingKey || (!connection.privateKeyPEM.isEmpty && keyValidationError == nil && derivedPublicKey != nil)

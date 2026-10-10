@@ -2,22 +2,82 @@ import UIKit
 import MetalKit
 import SpecttyTerminal
 
+// UIKit owns marked text; only committed text leaves this field.
+final class TerminalIMETextField: UITextField {
+    var accessoryProvider: (() -> UIView?)?
+    var emptyDeleteHandler: (() -> Void)?
+    var routePresses: ((Set<UIPress>, UIPressesEvent?, Bool) -> Set<UIPress>)?
+    var onPaste: (() -> Void)?
+    var onCopy: (() -> Void)?
+
+    override var inputAccessoryView: UIView? {
+        get { accessoryProvider?() }
+        set {}
+    }
+
+    override func deleteBackward() {
+        let wasEmpty = markedTextRange == nil && (text?.isEmpty ?? true)
+        super.deleteBackward()
+        if wasEmpty { emptyDeleteHandler?() }
+    }
+
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        let remaining = routePresses?(presses, event, true) ?? presses
+        if !remaining.isEmpty { super.pressesBegan(remaining, with: event) }
+    }
+
+    override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        let remaining = routePresses?(presses, event, false) ?? presses
+        if !remaining.isEmpty { super.pressesEnded(remaining, with: event) }
+    }
+
+    override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        let remaining = routePresses?(presses, event, false) ?? presses
+        if !remaining.isEmpty { super.pressesCancelled(remaining, with: event) }
+    }
+
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool { false }
+
+    override func paste(_ sender: Any?) { onPaste?() }
+    override func copy(_ sender: Any?) { onCopy?() }
+}
+
 /// MTKView subclass that renders the terminal using Metal.
 /// Conforms to UIKeyInput so iOS presents the software keyboard.
 public final class TerminalMetalView: MTKView, UIKeyInput {
+    let imeTextField = TerminalIMETextField(frame: .zero)
+    let preeditLabel = UILabel()
+    private var isClearingIME = false
+    private var compositionReturnHeld = false
+    private var inputEnabled = true
+    private var wantsFirstResponder = false
+    private var currentTheme: TerminalTheme = .default
     private var renderer: TerminalMetalRenderer?
     private weak var terminalEmulator: (any TerminalEmulator)?
     private var scrollOffset: Int = 0
+    var isShowingLiveScreen: Bool { inputEnabled && scrollOffset == 0 && selectionView.selection == nil }
     private let feedbackGenerator = UIImpactFeedbackGenerator(style: .light)
     private lazy var _inputAccessory: TerminalInputAccessory = {
-        let bar = TerminalInputAccessory(frame: CGRect(x: 0, y: 0, width: bounds.width, height: 44))
+        let bar = TerminalInputAccessory(frame: CGRect(x: 0, y: 0, width: bounds.width, height: 100))
         bar.autoresizingMask = .flexibleWidth
         bar.onKeyPress = { [weak self] event in
-            self?.feedbackGenerator.impactOccurred()
-            self?.onKeyInput?(event)
+            guard let self, self.inputEnabled else { return }
+            self.feedbackGenerator.impactOccurred()
+            if event.keyCode == 0x29, self.imeTextField.markedTextRange != nil {
+                self.cancelIMEComposition()
+            } else {
+                self.onKeyInput?(event)
+            }
+        }
+        bar.onKeyboardToggle = { [weak self] in
+            guard let self else { return }
+            if self.isFirstResponder { self.resignFirstResponder() } else { self.becomeFirstResponder() }
         }
         return bar
     }()
+    private var pendingDisplayWorkItem: DispatchWorkItem?
+    private var isInBackground = false
+    private var lastDisplayTime: CFTimeInterval = 0
 
     /// Callback for when the view is resized and a new grid size is computed.
     public var onResize: ((Int, Int) -> Void)?
@@ -54,6 +114,7 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
 
     /// Visual bell flash layer.
     private var bellLayer: CALayer?
+    private static let minimumDisplayInterval: CFTimeInterval = 1.0 / 60
 
     public init(frame: CGRect, emulator: any TerminalEmulator) {
         guard let device = MTLCreateSystemDefaultDevice() else {
@@ -75,28 +136,60 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
     private func configure() {
         self.colorPixelFormat = .bgra8Unorm
         self.clearColor = MTLClearColor(red: 0.118, green: 0.118, blue: 0.118, alpha: 1.0)
-        self.isPaused = false
-        self.enableSetNeedsDisplay = false
-        self.preferredFramesPerSecond = 60
+        self.isPaused = true
+        self.enableSetNeedsDisplay = true
         self.delegate = self
         self.isMultipleTouchEnabled = true
         self.isUserInteractionEnabled = true
+        installDisplayChangeHandler(for: terminalEmulator)
+
+        imeTextField.autocorrectionType = .no
+        imeTextField.autocapitalizationType = .none
+        imeTextField.smartQuotesType = .no
+        imeTextField.smartDashesType = .no
+        imeTextField.smartInsertDeleteType = .no
+        imeTextField.spellCheckingType = .no
+        imeTextField.keyboardType = .default
+        imeTextField.delegate = self
+        imeTextField.isAccessibilityElement = false
+        imeTextField.textColor = .clear
+        imeTextField.tintColor = .clear
+        imeTextField.backgroundColor = .clear
+        imeTextField.accessoryProvider = { nil }
+        imeTextField.emptyDeleteHandler = { [weak self] in self?.deleteBackward() }
+        imeTextField.routePresses = { [weak self] presses, event, down in
+            self?.routeHardwarePresses(presses, with: event, isKeyDown: down) ?? presses
+        }
+        imeTextField.onPaste = { [weak self] in self?.handlePaste() }
+        imeTextField.onCopy = { [weak self] in self?.copyScreenText() }
+        imeTextField.addTarget(self, action: #selector(handleIMETextChanged), for: .editingChanged)
+        addSubview(imeTextField)
+        preeditLabel.isUserInteractionEnabled = false
+        preeditLabel.isHidden = true
+        addSubview(preeditLabel)
 
         // Selection overlay — hit tests only near drag handles, passes through otherwise.
         selectionView.frame = bounds
         selectionView.contentInsets = terminalContentInsets
         selectionView.cellSize = cellSize
         addSubview(selectionView)
+        addSubview(_inputAccessory)
+        _inputAccessory.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            _inputAccessory.leadingAnchor.constraint(equalTo: leadingAnchor),
+            _inputAccessory.trailingAnchor.constraint(equalTo: trailingAnchor),
+            _inputAccessory.bottomAnchor.constraint(equalTo: keyboardLayoutGuide.topAnchor),
+            _inputAccessory.heightAnchor.constraint(equalToConstant: 100)
+        ])
+        for name in [UIResponder.keyboardWillShowNotification, UIResponder.keyboardWillHideNotification, UIResponder.keyboardWillChangeFrameNotification] {
+            NotificationCenter.default.addObserver(self, selector: #selector(keyboardChanged), name: name, object: nil)
+        }
 
         // Edit menu interaction for copy/paste — nil delegate uses default
         // behavior, building the menu from canPerformAction/copy/paste.
         let interaction = UIEditMenuInteraction(delegate: nil)
         addInteraction(interaction)
         self.editMenuInteraction = interaction
-
-        // Tap to focus and show keyboard.
-        let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
-        addGestureRecognizer(tap)
 
         // Pause Metal rendering while backgrounded — drawables are unavailable
         // and attempting to render produces blank frames.
@@ -115,24 +208,24 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
     }
 
     @objc private func appDidEnterBackground() {
-        isPaused = true
+        isInBackground = true
+        pendingDisplayWorkItem?.cancel()
+        pendingDisplayWorkItem = nil
     }
 
     @objc private func appWillEnterForeground() {
-        isPaused = false
+        isInBackground = false
+        requestDisplay()
     }
 
-    @objc private func handleTap() {
-        // Clear any active selection on tap.
+    private func handleLocalTap() {
+        // Clear any active selection on tap before focusing the terminal.
         if selectionView.selection != nil {
             selectionView.selection = nil
             editMenuInteraction?.dismissMenu()
-            return
         }
 
-        if isFirstResponder {
-            resignFirstResponder()
-        } else {
+        if !isFirstResponder {
             becomeFirstResponder()
         }
     }
@@ -140,13 +233,51 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
     /// Swap the terminal emulator without recreating the view.
     /// Preserves first-responder status (keyboard stays up).
     public func setEmulator(_ emulator: any TerminalEmulator) {
+        cancelIMEComposition()
+        terminalEmulator?.onDisplayChange = nil
+        pendingDisplayWorkItem?.cancel()
+        pendingDisplayWorkItem = nil
         self.terminalEmulator = emulator
+        installDisplayChangeHandler(for: emulator)
         self.scrollOffset = 0
         gestureHandler?.removeGestures()
         setupGestureHandler(emulator: emulator)
         // Reset so the new emulator gets the current grid size.
         lastReportedGridSize = (0, 0)
         notifyResizeIfNeeded()
+        requestDisplay()
+    }
+
+    private func installDisplayChangeHandler(for emulator: (any TerminalEmulator)?) {
+        emulator?.onDisplayChange = { [weak self, weak emulator] in
+            Task { @MainActor [weak self, weak emulator] in
+                guard let self, let emulator, self.terminalEmulator === emulator else { return }
+                self.requestDisplay()
+            }
+        }
+    }
+
+    private func requestDisplay() {
+        guard window != nil, !isInBackground else { return }
+        let now = CACurrentMediaTime()
+        let nextDisplay = lastDisplayTime + Self.minimumDisplayInterval
+        if now >= nextDisplay {
+            pendingDisplayWorkItem?.cancel()
+            pendingDisplayWorkItem = nil
+            lastDisplayTime = now
+            setNeedsDisplay()
+            return
+        }
+        guard pendingDisplayWorkItem == nil else { return }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.pendingDisplayWorkItem = nil
+            guard self.window != nil, !self.isInBackground else { return }
+            self.lastDisplayTime = CACurrentMediaTime()
+            self.setNeedsDisplay()
+        }
+        pendingDisplayWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + (nextDisplay - now), execute: work)
     }
 
     private func setupGestureHandler(emulator: any TerminalEmulator) {
@@ -164,6 +295,9 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
         }
         handler.onEdgeSwipe = { [weak self] event in
             self?.onEdgeSwipe?(event)
+        }
+        handler.onLocalTap = { [weak self] in
+            self?.handleLocalTap()
         }
         // Handle-drag updates from the selection overlay.
         selectionView.onSelectionChanged = { [weak self, weak handler] selection in
@@ -191,13 +325,94 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
 
     public override var canBecomeFirstResponder: Bool { true }
 
-    public override var inputAccessoryView: UIView? { _inputAccessory }
+    public override var inputAccessoryView: UIView? { nil }
+
+    @objc private func keyboardChanged() {
+        setNeedsLayout()
+    }
+
+    private func updateInputAccessory() {
+        _inputAccessory.isHidden = UITextInputContext.current()?.isHardwareKeyboardInputExpected ?? false
+        _inputAccessory.softwareKeyboardVisible = isFirstResponder && keyboardLayoutGuide.layoutFrame.height > safeAreaInsets.bottom + 1
+    }
+
+
+    public override var isFirstResponder: Bool { imeTextField.isFirstResponder }
+
+    @discardableResult public override func becomeFirstResponder() -> Bool {
+        wantsFirstResponder = true
+        guard inputEnabled else { return false }
+        updatePreeditOverlay()
+        return imeTextField.becomeFirstResponder()
+    }
+
+    @discardableResult public override func resignFirstResponder() -> Bool {
+        wantsFirstResponder = false
+        cancelIMEComposition()
+        return imeTextField.resignFirstResponder()
+    }
+
+    public func setInputEnabled(_ enabled: Bool) {
+        guard inputEnabled != enabled else { return }
+        inputEnabled = enabled
+        if !enabled { cancelIMEComposition() }
+        imeTextField.isEnabled = enabled
+        if enabled && wantsFirstResponder { _ = becomeFirstResponder() }
+    }
+
+    func cancelIMEComposition() {
+        isClearingIME = true
+        imeTextField.text = ""
+        imeTextField.unmarkText()
+        compositionReturnHeld = false
+        isClearingIME = false
+        updatePreeditOverlay()
+        requestDisplay()
+    }
+
+    @objc func handleIMETextChanged() {
+        guard !isClearingIME else { return }
+        guard inputEnabled else { cancelIMEComposition(); return }
+        if imeTextField.markedTextRange == nil, let text = imeTextField.text, !text.isEmpty {
+            imeTextField.text = ""
+            insertText(text)
+        }
+        updatePreeditOverlay()
+        requestDisplay()
+    }
+
+    private func updatePreeditOverlay() {
+        guard let screen = terminalEmulator?.state.activeScreen else { return }
+        let rect = terminalContentRect
+        let col = max(0, min(screen.cursor.col, screen.columns - 1))
+        let row = max(0, min(screen.cursor.row, screen.rows - 1))
+        let origin = CGPoint(x: rect.minX + CGFloat(col) * cellSize.width,
+                             y: rect.minY + CGFloat(row) * cellSize.height)
+        let inputFrame = CGRect(origin: origin, size: cellSize)
+        if imeTextField.frame != inputFrame { imeTextField.frame = inputFrame }
+        let text = imeTextField.markedTextRange == nil ? "" : (imeTextField.text ?? "")
+        preeditLabel.isHidden = text.isEmpty
+        renderer?.setCursorSuppressed(!text.isEmpty)
+        let content = NSAttributedString(string: text, attributes: [
+            .font: UIFont(name: terminalFont.name, size: terminalFont.size) ?? UIFont.monospacedSystemFont(ofSize: terminalFont.size, weight: .regular),
+            .foregroundColor: UIColor(red: CGFloat(currentTheme.foreground.0) / 255, green: CGFloat(currentTheme.foreground.1) / 255, blue: CGFloat(currentTheme.foreground.2) / 255, alpha: 1),
+            .underlineStyle: NSUnderlineStyle.single.rawValue
+        ])
+        if preeditLabel.attributedText?.isEqual(to: content) != true {
+            preeditLabel.attributedText = content
+            preeditLabel.sizeToFit()
+        }
+        let labelFrame = CGRect(origin: origin, size: CGSize(width: min(preeditLabel.intrinsicContentSize.width, max(0, rect.maxX - origin.x)), height: max(0, preeditLabel.intrinsicContentSize.height)))
+        if preeditLabel.frame != labelFrame { preeditLabel.frame = labelFrame }
+    }
+
 
     /// UIKeyInput: tells iOS we always accept text (keeps keyboard open).
     public var hasText: Bool { true }
 
     /// UIKeyInput: software keyboard character input.
     public func insertText(_ text: String) {
+        guard inputEnabled else { return }
         var modifiers = KeyModifiers()
         if _inputAccessory.ctrlActive { modifiers.insert(.control) }
         if _inputAccessory.shiftActive { modifiers.insert(.shift) }
@@ -249,6 +464,12 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
 
     /// UIKeyInput: software keyboard backspace.
     public func deleteBackward() {
+        guard inputEnabled else { return }
+        if imeTextField.markedTextRange != nil {
+            imeTextField.deleteBackward()
+            updatePreeditOverlay()
+            return
+        }
         var modifiers = KeyModifiers()
         if _inputAccessory.ctrlActive { modifiers.insert(.control) }
         if _inputAccessory.shiftActive { modifiers.insert(.shift) }
@@ -314,6 +535,8 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
     }
 
     @objc private func handlePaste() {
+        guard inputEnabled else { return }
+        cancelIMEComposition()
         guard let text = UIPasteboard.general.string else { return }
         if let emulator = terminalEmulator, emulator.state.modes.contains(.bracketedPaste) {
             let bracketed = "\u{1B}[200~" + text + "\u{1B}[201~"
@@ -396,10 +619,13 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
         guard font.name != terminalFont.name || font.size != terminalFont.size else { return }
         self.terminalFont = font
         renderer?.setFont(font)
+        updatePreeditOverlay()
         notifyResizeIfNeeded()
+        requestDisplay()
     }
 
     public func setTheme(_ theme: TerminalTheme) {
+        currentTheme = theme
         renderer?.setTheme(theme)
         // Update the clear color to match the theme background.
         self.clearColor = MTLClearColor(
@@ -408,10 +634,12 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
             blue: Double(theme.background.2) / 255.0,
             alpha: 1.0
         )
+        requestDisplay()
     }
 
     public func setCursorStyle(_ style: CursorStyle) {
         renderer?.setCursorStyle(style)
+        requestDisplay()
     }
 
     // MARK: - Scrollback
@@ -437,7 +665,11 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
 
     /// Drawable content rect after applying terminal insets.
     var terminalContentRect: CGRect {
-        let rect = bounds.inset(by: terminalContentInsets)
+        var rect = bounds.inset(by: terminalContentInsets)
+        if !_inputAccessory.isHidden {
+            let barTop = _inputAccessory.frame.isEmpty || _inputAccessory.frame.maxY <= bounds.minY ? bounds.maxY - safeAreaInsets.bottom - 100 : _inputAccessory.frame.minY
+            rect.size.height = max(0, min(rect.maxY, barTop - 4) - rect.minY)
+        }
         guard rect.width > 0, rect.height > 0 else { return .zero }
         return rect
     }
@@ -500,39 +732,65 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
 
     public override func layoutSubviews() {
         super.layoutSubviews()
+        updateInputAccessory()
         selectionView.frame = bounds
         selectionView.contentInsets = terminalContentInsets
         selectionView.cellSize = cellSize
         bellLayer?.frame = bounds
+        updatePreeditOverlay()
         notifyResizeIfNeeded()
+        requestDisplay()
+    }
+
+    public override func didMoveToWindow() {
+        super.didMoveToWindow()
+        setNeedsLayout()
+        requestDisplay()
     }
 
     // MARK: - Hardware Key Input (external keyboards)
 
     public override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-        for press in presses {
-            guard let key = press.key else { continue }
-            let keyEvent = KeyEvent(
-                keyCode: UInt32(key.keyCode.rawValue),
-                modifiers: modifiersFromUIKey(key),
-                isKeyDown: true,
-                characters: key.characters ?? ""
-            )
-            onKeyInput?(keyEvent)
-        }
+        let remaining = routeHardwarePresses(presses, with: event, isKeyDown: true)
+        if !remaining.isEmpty { super.pressesBegan(remaining, with: event) }
     }
 
     public override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        let remaining = routeHardwarePresses(presses, with: event, isKeyDown: false)
+        if !remaining.isEmpty { super.pressesEnded(remaining, with: event) }
+    }
+
+    private func routeHardwarePresses(_ presses: Set<UIPress>, with event: UIPressesEvent?, isKeyDown: Bool) -> Set<UIPress> {
+        guard inputEnabled else { return [] }
+        var remaining = Set<UIPress>()
         for press in presses {
-            guard let key = press.key else { continue }
-            let keyEvent = KeyEvent(
-                keyCode: UInt32(key.keyCode.rawValue),
-                modifiers: modifiersFromUIKey(key),
-                isKeyDown: false,
-                characters: key.characters ?? ""
-            )
-            onKeyInput?(keyEvent)
+            guard let key = press.key else { remaining.insert(press); continue }
+            if imeTextField.markedTextRange != nil {
+                if key.keyCode == .keyboardEscape {
+                    if isKeyDown { cancelIMEComposition() }
+                    continue
+                }
+                if key.keyCode == .keyboardReturnOrEnter { compositionReturnHeld = isKeyDown }
+                remaining.insert(press)
+                continue
+            }
+            if key.keyCode == .keyboardReturnOrEnter, compositionReturnHeld {
+                if !isKeyDown { compositionReturnHeld = false }
+                continue
+            }
+            let isSpecial = (0x28...0x2B).contains(key.keyCode.rawValue) || (0x3A...0x52).contains(key.keyCode.rawValue)
+            let modifiers = key.modifierFlags.intersection([.shift, .alternate, .control, .command])
+            // Let UIKit handle app shortcuts, input-method switching, and printable text.
+            if modifiers.contains(.command) ||
+               ((modifiers == .control || modifiers == [.control, .shift]) && key.charactersIgnoringModifiers == " ") ||
+               (!isSpecial && modifiers.subtracting(.shift).isEmpty && !key.characters.isEmpty && key.characters.rangeOfCharacter(from: .controlCharacters) == nil) {
+                remaining.insert(press)
+                continue
+            }
+            onKeyInput?(KeyEvent(keyCode: UInt32(key.keyCode.rawValue), modifiers: modifiersFromUIKey(key), isKeyDown: isKeyDown,
+                characters: HardwareKeyInterpreter.terminalCharacters(rawCharacters: key.characters, charactersIgnoringModifiers: key.charactersIgnoringModifiers, modifiers: key.modifierFlags)))
         }
+        return remaining
     }
 
     private func modifiersFromUIKey(_ key: UIKey) -> KeyModifiers {
@@ -553,12 +811,14 @@ extension TerminalMetalView: MTKViewDelegate {
     }
 
     public func draw(in view: MTKView) {
-        guard let emulator = terminalEmulator,
+        guard !isInBackground,
+              let emulator = terminalEmulator,
               let renderer = renderer,
               let renderPassDescriptor = view.currentRenderPassDescriptor,
               let drawable = view.currentDrawable
         else { return }
 
+        updatePreeditOverlay()
         let state = emulator.state.activeScreen
         renderer.update(
             state: state,
@@ -568,5 +828,18 @@ extension TerminalMetalView: MTKViewDelegate {
             contentRect: terminalContentRect
         )
         renderer.render(to: renderPassDescriptor, drawable: drawable)
+    }
+}
+
+extension TerminalMetalView: UITextFieldDelegate {
+    public func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
+        guard inputEnabled else { return false }
+        if string == "\n" || string == "\r" {
+            if textField.markedTextRange != nil { return false }
+            handleIMETextChanged()
+            if !compositionReturnHeld { insertText("\n") }
+            return false
+        }
+        return true
     }
 }
