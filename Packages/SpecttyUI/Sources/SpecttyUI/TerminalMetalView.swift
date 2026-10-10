@@ -569,7 +569,11 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
                 keyCode: UInt32(key.keyCode.rawValue),
                 modifiers: modifiersFromUIKey(key),
                 isKeyDown: true,
-                characters: key.characters ?? ""
+                characters: HardwareKeyInterpreter.terminalCharacters(
+                    rawCharacters: key.characters,
+                    charactersIgnoringModifiers: key.charactersIgnoringModifiers,
+                    modifiers: key.modifierFlags
+                )
             )
             onKeyInput?(keyEvent)
         }
@@ -582,7 +586,11 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
                 keyCode: UInt32(key.keyCode.rawValue),
                 modifiers: modifiersFromUIKey(key),
                 isKeyDown: false,
-                characters: key.characters ?? ""
+                characters: HardwareKeyInterpreter.terminalCharacters(
+                    rawCharacters: key.characters,
+                    charactersIgnoringModifiers: key.charactersIgnoringModifiers,
+                    modifiers: key.modifierFlags
+                )
             )
             onKeyInput?(keyEvent)
         }
