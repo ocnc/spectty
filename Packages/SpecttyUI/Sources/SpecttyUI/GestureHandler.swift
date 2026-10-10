@@ -123,32 +123,26 @@ public final class GestureHandler: NSObject {
 
     @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
         guard gesture.state == .ended else { return }
-        guard let metalView = metalView, let emulator = emulator else { return }
+        guard let metalView else { return }
+        handleTap(at: gesture.location(in: metalView))
+    }
 
-        if shouldSendRemoteMouseClick(for: emulator.state.modes), emulator.state.modes.contains(.mouseSGR) {
-            metalView.becomeFirstResponder()
-            let point = gesture.location(in: metalView)
+    func handleTap(at point: CGPoint) {
+        guard let metalView, let emulator else { return }
+        let modes = emulator.state.modes
+        guard metalView.terminalContentRect.contains(point) else { return }
+        if metalView.isShowingLiveScreen,
+           modes.contains(.mouseSGR),
+           modes.contains(.mouseButton) || modes.contains(.mouseAny) {
             let coord = metalView.gridCoordinate(for: point)
-            let x = coord.col + 1
-            let y = coord.row + 1
-            onMouseEvent?(encodeSGRMousePress(x: x, y: y))
-            onMouseEvent?(encodeSGRMouseRelease(x: x, y: y))
+            let x = min(coord.col + 1, emulator.state.columns)
+            let y = min(coord.row + 1, emulator.state.rows)
+            // Keep the click atomic in the existing outbound queue.
+            onMouseEvent?(Data("\u{1B}[<0;\(x);\(y)M\u{1B}[<0;\(x);\(y)m".utf8))
+            metalView.becomeFirstResponder()
             return
         }
-
         onLocalTap?()
-    }
-
-    private func shouldSendRemoteMouseClick(for modes: TerminalModes) -> Bool {
-        modes.contains(.mouseButton) || modes.contains(.mouseAny)
-    }
-
-    private func encodeSGRMousePress(x: Int, y: Int) -> Data {
-        Data("\u{1B}[<0;\(x);\(y)M".utf8)
-    }
-
-    private func encodeSGRMouseRelease(x: Int, y: Int) -> Data {
-        Data("\u{1B}[<3;\(x);\(y)m".utf8)
     }
 
     // MARK: - Pan (Scroll)

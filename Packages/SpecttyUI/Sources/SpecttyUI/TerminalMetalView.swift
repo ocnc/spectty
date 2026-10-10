@@ -8,6 +8,7 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
     private var renderer: TerminalMetalRenderer?
     private weak var terminalEmulator: (any TerminalEmulator)?
     private var scrollOffset: Int = 0
+    var isShowingLiveScreen: Bool { scrollOffset == 0 && selectionView.selection == nil }
     private let feedbackGenerator = UIImpactFeedbackGenerator(style: .light)
     private lazy var _inputAccessory: TerminalInputAccessory = {
         let bar = TerminalInputAccessory(frame: CGRect(x: 0, y: 0, width: bounds.width, height: 44))
