@@ -19,6 +19,7 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
         return bar
     }()
     private var pendingDisplayWorkItem: DispatchWorkItem?
+    private var isInBackground = false
     private var lastDisplayTime: CFTimeInterval = 0
 
     /// Callback for when the view is resized and a new grid size is computed.
@@ -56,7 +57,7 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
 
     /// Visual bell flash layer.
     private var bellLayer: CALayer?
-    private static let minimumDisplayInterval: CFTimeInterval = 1.0 / 10
+    private static let minimumDisplayInterval: CFTimeInterval = 1.0 / 60
 
     public init(frame: CGRect, emulator: any TerminalEmulator) {
         guard let device = MTLCreateSystemDefaultDevice() else {
@@ -118,12 +119,13 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
     }
 
     @objc private func appDidEnterBackground() {
-        isPaused = true
+        isInBackground = true
         pendingDisplayWorkItem?.cancel()
         pendingDisplayWorkItem = nil
     }
 
     @objc private func appWillEnterForeground() {
+        isInBackground = false
         requestDisplay()
     }
 
@@ -145,7 +147,9 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
     /// Swap the terminal emulator without recreating the view.
     /// Preserves first-responder status (keyboard stays up).
     public func setEmulator(_ emulator: any TerminalEmulator) {
-        installDisplayChangeHandler(for: nil)
+        terminalEmulator?.onDisplayChange = nil
+        pendingDisplayWorkItem?.cancel()
+        pendingDisplayWorkItem = nil
         self.terminalEmulator = emulator
         installDisplayChangeHandler(for: emulator)
         self.scrollOffset = 0
@@ -158,43 +162,35 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
     }
 
     private func installDisplayChangeHandler(for emulator: (any TerminalEmulator)?) {
-        emulator?.onDisplayChange = { [weak self] in
-            Task { @MainActor [weak self] in
-                self?.requestDisplay()
+        emulator?.onDisplayChange = { [weak self, weak emulator] in
+            Task { @MainActor [weak self, weak emulator] in
+                guard let self, let emulator, self.terminalEmulator === emulator else { return }
+                self.requestDisplay()
             }
         }
     }
 
     private func requestDisplay() {
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            guard self.window != nil else { return }
-            let now = CACurrentMediaTime()
-            let earliestNextDisplay = self.lastDisplayTime + Self.minimumDisplayInterval
-
-            if now >= earliestNextDisplay {
-                self.pendingDisplayWorkItem?.cancel()
-                self.pendingDisplayWorkItem = nil
-                self.lastDisplayTime = now
-                self.setNeedsDisplay()
-                return
-            }
-
-            guard self.pendingDisplayWorkItem == nil else { return }
-
-            let work = DispatchWorkItem { [weak self] in
-                guard let self else { return }
-                self.pendingDisplayWorkItem = nil
-                guard self.window != nil else { return }
-                self.lastDisplayTime = CACurrentMediaTime()
-                self.setNeedsDisplay()
-            }
-            self.pendingDisplayWorkItem = work
-            DispatchQueue.main.asyncAfter(
-                deadline: .now() + (earliestNextDisplay - now),
-                execute: work
-            )
+        guard window != nil, !isInBackground else { return }
+        let now = CACurrentMediaTime()
+        let nextDisplay = lastDisplayTime + Self.minimumDisplayInterval
+        if now >= nextDisplay {
+            pendingDisplayWorkItem?.cancel()
+            pendingDisplayWorkItem = nil
+            lastDisplayTime = now
+            setNeedsDisplay()
+            return
         }
+        guard pendingDisplayWorkItem == nil else { return }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.pendingDisplayWorkItem = nil
+            guard self.window != nil, !self.isInBackground else { return }
+            self.lastDisplayTime = CACurrentMediaTime()
+            self.setNeedsDisplay()
+        }
+        pendingDisplayWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + (nextDisplay - now), execute: work)
     }
 
     private func setupGestureHandler(emulator: any TerminalEmulator) {
@@ -556,6 +552,12 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
         selectionView.cellSize = cellSize
         bellLayer?.frame = bounds
         notifyResizeIfNeeded()
+        requestDisplay()
+    }
+
+    public override func didMoveToWindow() {
+        super.didMoveToWindow()
+        requestDisplay()
     }
 
     // MARK: - Hardware Key Input (external keyboards)
@@ -604,7 +606,8 @@ extension TerminalMetalView: MTKViewDelegate {
     }
 
     public func draw(in view: MTKView) {
-        guard let emulator = terminalEmulator,
+        guard !isInBackground,
+              let emulator = terminalEmulator,
               let renderer = renderer,
               let renderPassDescriptor = view.currentRenderPassDescriptor,
               let drawable = view.currentDrawable
