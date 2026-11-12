@@ -8,6 +8,7 @@ import SpecttyTerminal
 public struct TerminalView: UIViewRepresentable {
     private let emulator: any TerminalEmulator
     private let onKeyInput: ((KeyEvent) -> Void)?
+    private let onVoiceInput: (() -> Void)?
     private let onPaste: ((Data) -> Void)?
     private let onResize: ((Int, Int) -> Void)?
     private let onEdgeSwipe: ((EdgeSwipeEvent) -> Void)?
@@ -27,7 +28,8 @@ public struct TerminalView: UIViewRepresentable {
         onKeyInput: ((KeyEvent) -> Void)? = nil,
         onPaste: ((Data) -> Void)? = nil,
         onResize: ((Int, Int) -> Void)? = nil,
-        onEdgeSwipe: ((EdgeSwipeEvent) -> Void)? = nil
+        onEdgeSwipe: ((EdgeSwipeEvent) -> Void)? = nil,
+        onVoiceInput: (() -> Void)? = nil
     ) {
         self.emulator = emulator
         self.font = font
@@ -36,6 +38,7 @@ public struct TerminalView: UIViewRepresentable {
         self.autoFocus = autoFocus
         self.inputEnabled = inputEnabled
         self.onKeyInput = onKeyInput
+        self.onVoiceInput = onVoiceInput
         self.onPaste = onPaste
         self.onResize = onResize
         self.onEdgeSwipe = onEdgeSwipe
@@ -54,6 +57,7 @@ public struct TerminalView: UIViewRepresentable {
         coordinator.emulatorID = ObjectIdentifier(emulator)
 
         let metalView = TerminalMetalView(frame: .zero, emulator: emulator)
+        metalView.onVoiceInput = onVoiceInput
         metalView.setInputEnabled(inputEnabled)
         metalView.onKeyInput = { [weak coordinator] event in
             coordinator?.onKeyInput?(event)
@@ -95,6 +99,7 @@ public struct TerminalView: UIViewRepresentable {
             uiView.setEmulator(emulator)
         }
 
+        uiView.onVoiceInput = onVoiceInput
         uiView.setInputEnabled(inputEnabled)
         uiView.setFont(font)
         uiView.setTheme(TerminalTheme.named(themeName))

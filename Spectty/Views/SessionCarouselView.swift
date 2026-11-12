@@ -1,8 +1,13 @@
 import SwiftUI
 import SpecttyUI
+import SpecttyTerminal
+import SpecttyTransport
 
 struct SessionCarouselView: View {
     @Environment(SessionManager.self) private var sessionManager
+    @Environment(VoiceInputStore.self) private var voiceInput
+    @Environment(PrivacyLockManager.self) private var lockManager
+    @State private var voiceSession: TerminalSession?
     @Environment(\.dismiss) private var dismiss
 
     @State private var dragOffset: CGFloat = 0
@@ -28,7 +33,8 @@ struct SessionCarouselView: View {
                 if let active = sessionManager.activeSession {
                     TerminalSessionView(
                         session: active,
-                        onEdgeSwipe: { handleEdgeSwipe($0, width: geo.size.width) }
+                        onEdgeSwipe: { handleEdgeSwipe($0, width: geo.size.width) },
+                        onVoiceInput: voiceInput.isReady ? { openVoiceInput() } : nil
                     )
                     .offset(x: dragOffset)
                 }
@@ -71,6 +77,15 @@ struct SessionCarouselView: View {
                 }
             }
         }
+        .sheet(item: $voiceSession) { session in
+            VoiceInputSheet(modelDirectory: voiceInput.modelDirectory, sessionName: session.connectionName) { text in
+                guard voiceSession?.id == session.id, sessionManager.activeSessionID == session.id,
+                      canRecord else { return }
+                session.sendData(TerminalPaste.data(for: text, bracketed: session.emulator.state.modes.contains(.bracketedPaste)))
+            }
+        }
+        .onChange(of: sessionManager.activeSessionID) { _, _ in voiceSession = nil }
+        .onChange(of: canRecord) { _, allowed in if !allowed { voiceSession = nil } }
         .confirmationDialog(
             "Disconnect from \(sessionManager.activeSession?.connectionName ?? "")?",
             isPresented: $showDisconnectConfirm,
@@ -104,6 +119,18 @@ struct SessionCarouselView: View {
         .onChange(of: sessionManager.sessions.count) { _, newCount in
             if newCount == 0 { dismiss() }
         }
+    }
+
+    private var canRecord: Bool {
+        guard voiceInput.isReady, !lockManager.isLocked,
+              let session = sessionManager.activeSession,
+              case .connected = session.transportState else { return false }
+        return true
+    }
+
+    private func openVoiceInput() {
+        guard canRecord else { return }
+        voiceSession = sessionManager.activeSession
     }
 
     private var activeTitle: String {

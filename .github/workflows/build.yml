@@ -19,6 +19,9 @@ jobs:
       - name: Terminal tests
         run: swift test --package-path Packages/SpecttyTerminal
 
+      - name: Speech tests and download resume
+        run: python3 scripts/test-speech.py
+
       - name: UI package and app tests
         working-directory: Packages/SpecttyUI
         run: |

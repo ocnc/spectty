@@ -6,6 +6,7 @@ struct TerminalSessionView: View {
     let session: TerminalSession
     var onEdgeSwipe: ((EdgeSwipeEvent) -> Void)? = nil
     var autoFocus: Bool = true
+    var onVoiceInput: (() -> Void)? = nil
     @Environment(SessionManager.self) private var sessionManager
     @AppStorage("defaultFontName") private var fontName = "Menlo"
     @AppStorage("defaultFontSize") private var fontSize = 14.0
@@ -30,7 +31,8 @@ struct TerminalSessionView: View {
                 onResize: { columns, rows in
                     sessionManager.resizeAllSessions(columns: columns, rows: rows)
                 },
-                onEdgeSwipe: onEdgeSwipe
+                onEdgeSwipe: onEdgeSwipe,
+                onVoiceInput: onVoiceInput
             )
 
             // Connection status overlay.

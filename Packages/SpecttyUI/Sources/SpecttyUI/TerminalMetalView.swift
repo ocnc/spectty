@@ -81,7 +81,7 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
     var isShowingLiveScreen: Bool { inputEnabled && scrollOffset == 0 && selectionView.selection == nil }
     private let feedbackGenerator = UIImpactFeedbackGenerator(style: .light)
     private lazy var _inputAccessory: TerminalInputAccessory = {
-        let bar = TerminalInputAccessory(frame: CGRect(x: 0, y: 0, width: bounds.width, height: 100))
+        let bar = TerminalInputAccessory(frame: CGRect(x: 0, y: 0, width: bounds.width, height: TerminalInputAccessory.barHeight))
         bar.autoresizingMask = .flexibleWidth
         bar.onKeyPress = { [weak self] event in
             guard let self, self.inputEnabled else { return }
@@ -91,10 +91,6 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
             } else {
                 self.onKeyInput?(event)
             }
-        }
-        bar.onKeyboardToggle = { [weak self] in
-            guard let self else { return }
-            if self.isFirstResponder { self.resignFirstResponder() } else { self.becomeFirstResponder() }
         }
         return bar
     }()
@@ -108,6 +104,18 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
     /// Callback for key input.
     public var onKeyInput: ((KeyEvent) -> Void)?
 
+    /// Presents voice input when available.
+    public var onVoiceInput: (() -> Void)? {
+        didSet {
+            _inputAccessory.onVoiceInput = onVoiceInput == nil ? nil : { [weak self] in
+                guard let self, self.inputEnabled else { return }
+                self.cancelIMEComposition()
+                self.resignFirstResponder()
+                self.onVoiceInput?()
+            }
+            setNeedsLayout()
+        }
+    }
     /// Callback for paste data (bracketed paste aware).
     public var onPaste: ((Data) -> Void)?
 
@@ -201,8 +209,7 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
         NSLayoutConstraint.activate([
             _inputAccessory.leadingAnchor.constraint(equalTo: leadingAnchor),
             _inputAccessory.trailingAnchor.constraint(equalTo: trailingAnchor),
-            _inputAccessory.bottomAnchor.constraint(equalTo: keyboardLayoutGuide.topAnchor),
-            _inputAccessory.heightAnchor.constraint(equalToConstant: 100)
+            _inputAccessory.bottomAnchor.constraint(equalTo: keyboardLayoutGuide.topAnchor)
         ])
         for name in [UIResponder.keyboardWillShowNotification, UIResponder.keyboardWillHideNotification, UIResponder.keyboardWillChangeFrameNotification] {
             NotificationCenter.default.addObserver(self, selector: #selector(keyboardChanged), name: name, object: nil)
@@ -355,8 +362,7 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
     }
 
     private func updateInputAccessory() {
-        _inputAccessory.isHidden = UITextInputContext.current()?.isHardwareKeyboardInputExpected ?? false
-        _inputAccessory.softwareKeyboardVisible = isFirstResponder && keyboardLayoutGuide.layoutFrame.height > safeAreaInsets.bottom + 1
+        _inputAccessory.isHidden = onVoiceInput == nil && (UITextInputContext.current()?.isHardwareKeyboardInputExpected ?? false)
     }
 
 
@@ -439,6 +445,7 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
         var modifiers = KeyModifiers()
         if _inputAccessory.ctrlActive { modifiers.insert(.control) }
         if _inputAccessory.shiftActive { modifiers.insert(.shift) }
+        if _inputAccessory.altActive { modifiers.insert(.alt) }
         let hasModifiers = !modifiers.isEmpty
 
         // QuickPath/swipe often commits whole words at once.
@@ -496,6 +503,7 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
         var modifiers = KeyModifiers()
         if _inputAccessory.ctrlActive { modifiers.insert(.control) }
         if _inputAccessory.shiftActive { modifiers.insert(.shift) }
+        if _inputAccessory.altActive { modifiers.insert(.alt) }
         let hasModifiers = !modifiers.isEmpty
 
         let event = KeyEvent(
@@ -561,12 +569,7 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
         guard inputEnabled else { return }
         cancelIMEComposition()
         guard let text = UIPasteboard.general.string else { return }
-        if let emulator = terminalEmulator, emulator.state.modes.contains(.bracketedPaste) {
-            let bracketed = "\u{1B}[200~" + text + "\u{1B}[201~"
-            onPaste?(Data(bracketed.utf8))
-        } else {
-            onPaste?(Data(text.utf8))
-        }
+        onPaste?(TerminalPaste.data(for: text, bracketed: terminalEmulator?.state.modes.contains(.bracketedPaste) == true))
     }
 
     @objc private func handleClearScreen() {
@@ -649,6 +652,7 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
 
     public func setTheme(_ theme: TerminalTheme) {
         currentTheme = theme
+        _inputAccessory.setTheme(theme)
         renderer?.setTheme(theme)
         // Update the clear color to match the theme background.
         self.clearColor = MTLClearColor(
@@ -690,7 +694,7 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
     var terminalContentRect: CGRect {
         var rect = bounds.inset(by: terminalContentInsets)
         if !_inputAccessory.isHidden {
-            let barTop = _inputAccessory.frame.isEmpty || _inputAccessory.frame.maxY <= bounds.minY ? bounds.maxY - safeAreaInsets.bottom - 100 : _inputAccessory.frame.minY
+            let barTop = _inputAccessory.frame.isEmpty || _inputAccessory.frame.maxY <= bounds.minY ? bounds.maxY - safeAreaInsets.bottom - _inputAccessory.intrinsicContentSize.height : _inputAccessory.frame.minY
             rect.size.height = max(0, min(rect.maxY, barTop - 4) - rect.minY)
         }
         guard rect.width > 0, rect.height > 0 else { return .zero }
