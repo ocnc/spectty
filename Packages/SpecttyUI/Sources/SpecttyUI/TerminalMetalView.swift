@@ -15,6 +15,29 @@ final class TerminalIMETextField: UITextField {
         set {}
     }
 
+    override func insertText(_ text: String) {
+        super.insertText(text)
+        sendActions(for: .editingChanged)
+    }
+
+    override func insertText(_ text: String, alternatives: [String], style: UITextAlternativeStyle) {
+        super.insertText(text, alternatives: alternatives, style: style)
+        sendActions(for: .editingChanged)
+    }
+
+    override func setMarkedText(_ markedText: String?, selectedRange: NSRange) {
+        super.setMarkedText(markedText, selectedRange: selectedRange)
+        sendActions(for: .editingChanged)
+    }
+
+    override func unmarkText() {
+        let wasComposing = markedTextRange != nil
+        super.unmarkText()
+        guard wasComposing else { return }
+        // UIKit may unmark in the middle of replacing text; read the final edit.
+        DispatchQueue.main.async { [weak self] in self?.sendActions(for: .editingChanged) }
+    }
+
     override func deleteBackward() {
         let wasEmpty = markedTextRange == nil && (text?.isEmpty ?? true)
         super.deleteBackward()
@@ -162,7 +185,7 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
         }
         imeTextField.onPaste = { [weak self] in self?.handlePaste() }
         imeTextField.onCopy = { [weak self] in self?.copyScreenText() }
-        imeTextField.addTarget(self, action: #selector(handleIMETextChanged), for: .editingChanged)
+        imeTextField.addAction(UIAction { [weak self] _ in self?.handleIMETextChanged() }, for: .editingChanged)
         addSubview(imeTextField)
         preeditLabel.isUserInteractionEnabled = false
         preeditLabel.isHidden = true

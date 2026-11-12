@@ -51,4 +51,30 @@ final class InputAccessoryTests: XCTestCase {
     @MainActor private func descendants(of view: UIView) -> [UIView] {
         view.subviews + view.subviews.flatMap { descendants(of: $0) }
     }
+
+    @MainActor func testKeyboardToggleCanRepeatedlyShowAndHideNativeInput() throws {
+        guard MTLCreateSystemDefaultDevice() != nil else { throw XCTSkip("Metal unavailable") }
+        let emulator = GhosttyTerminalEmulator(columns: 80, rows: 24)
+        let view = TerminalMetalView(frame: CGRect(x: 0, y: 0, width: 390, height: 700), emulator: emulator)
+        let window = UIWindow(frame: view.bounds)
+        let controller = UIViewController()
+        window.rootViewController = controller
+        controller.view.addSubview(view)
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        view.setNeedsLayout()
+        view.layoutIfNeeded()
+        let toggle = try XCTUnwrap(descendants(of: view).compactMap { $0 as? UIButton }
+            .first { $0.accessibilityLabel == "Show keyboard" })
+        var sent = [String]()
+        view.onKeyInput = { sent.append($0.characters) }
+        for _ in 0..<3 {
+            toggle.sendActions(for: .touchUpInside)
+            XCTAssertTrue(view.imeTextField.isFirstResponder)
+            view.imeTextField.insertText("x")
+            toggle.sendActions(for: .touchUpInside)
+            XCTAssertFalse(view.imeTextField.isFirstResponder)
+        }
+        XCTAssertEqual(sent, ["x", "x", "x"])
+    }
 }
