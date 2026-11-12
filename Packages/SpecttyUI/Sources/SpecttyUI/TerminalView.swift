@@ -15,6 +15,7 @@ public struct TerminalView: UIViewRepresentable {
     private let themeName: String
     private let cursorStyle: CursorStyle
     private let autoFocus: Bool
+    private let inputEnabled: Bool
 
     public init(
         emulator: any TerminalEmulator,
@@ -22,6 +23,7 @@ public struct TerminalView: UIViewRepresentable {
         themeName: String = "Default",
         cursorStyle: CursorStyle = .block,
         autoFocus: Bool = true,
+        inputEnabled: Bool = true,
         onKeyInput: ((KeyEvent) -> Void)? = nil,
         onPaste: ((Data) -> Void)? = nil,
         onResize: ((Int, Int) -> Void)? = nil,
@@ -32,6 +34,7 @@ public struct TerminalView: UIViewRepresentable {
         self.themeName = themeName
         self.cursorStyle = cursorStyle
         self.autoFocus = autoFocus
+        self.inputEnabled = inputEnabled
         self.onKeyInput = onKeyInput
         self.onPaste = onPaste
         self.onResize = onResize
@@ -51,6 +54,7 @@ public struct TerminalView: UIViewRepresentable {
         coordinator.emulatorID = ObjectIdentifier(emulator)
 
         let metalView = TerminalMetalView(frame: .zero, emulator: emulator)
+        metalView.setInputEnabled(inputEnabled)
         metalView.onKeyInput = { [weak coordinator] event in
             coordinator?.onKeyInput?(event)
         }
@@ -91,6 +95,7 @@ public struct TerminalView: UIViewRepresentable {
             uiView.setEmulator(emulator)
         }
 
+        uiView.setInputEnabled(inputEnabled)
         uiView.setFont(font)
         uiView.setTheme(TerminalTheme.named(themeName))
         uiView.setCursorStyle(cursorStyle)

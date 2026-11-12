@@ -97,9 +97,7 @@ public final class TerminalScreenState: @unchecked Sendable {
     public func text() -> String {
         var result = [String]()
         for line in lines {
-            let lineText = String(line.cells.map { $0.character })
-                .replacingOccurrences(of: "\0", with: " ")
-            result.append(lineText.replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression))
+            result.append(line.textContent())
         }
         // Trim trailing empty lines.
         while result.last?.isEmpty == true {
@@ -177,6 +175,7 @@ public final class TerminalState: @unchecked Sendable {
         // Resize existing lines.
         for i in 0..<screen.lines.count {
             screen.lines[i].resize(columns: columns)
+            normalizeWideCharacters(in: &screen.lines[i])
         }
 
         // Add or remove lines as needed.
@@ -188,6 +187,7 @@ public final class TerminalState: @unchecked Sendable {
                 for _ in 0..<needed {
                     if var line = scrollback.popLast() {
                         line.resize(columns: columns)
+                        normalizeWideCharacters(in: &line)
                         recovered.insert(line, at: 0)
                     } else {
                         break
@@ -219,6 +219,7 @@ public final class TerminalState: @unchecked Sendable {
         // Clamp cursor.
         screen.cursor.row = min(screen.cursor.row, rows - 1)
         screen.cursor.col = min(screen.cursor.col, columns - 1)
+        normalizeCursorColumn(in: screen)
 
         // Adjust scroll region.
         screen.scrollTop = 0
@@ -226,5 +227,62 @@ public final class TerminalState: @unchecked Sendable {
 
         // Recalculate tab stops.
         screen.tabStops = Set(stride(from: 8, to: columns, by: 8))
+    }
+}
+
+public extension TerminalCell {
+    var isWideHead: Bool { attributes.contains(.wideChar) }
+    var isWideTail: Bool { attributes.contains(.wideCharTail) }
+}
+
+public extension TerminalLine {
+    mutating func normalizeWideCharacters() {
+        guard !cells.isEmpty else { return }
+
+        for index in cells.indices {
+            let cell = cells[index]
+            if cell.isWideTail {
+                let hasHead = index > 0 && cells[index - 1].isWideHead
+                if !hasHead {
+                    cells[index] = .blank
+                }
+            }
+
+            if cell.isWideHead {
+                let hasTail = index + 1 < cells.count && cells[index + 1].isWideTail
+                if !hasTail {
+                    cells[index] = .blank
+                }
+            }
+        }
+    }
+
+    func textContent() -> String {
+        var text = ""
+        var index = 0
+        while index < cells.count {
+            let cell = cells[index]
+            if cell.isWideTail {
+                index += 1
+                continue
+            }
+            text.append(cell.character)
+            index += cell.isWideHead ? 2 : 1
+        }
+        let lineText = text.replacingOccurrences(of: "\0", with: " ")
+        return lineText.replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression)
+    }
+}
+
+private func normalizeWideCharacters(in line: inout TerminalLine) {
+    line.normalizeWideCharacters()
+}
+
+private func normalizeCursorColumn(in screen: TerminalScreenState) {
+    guard screen.cursor.row >= 0 && screen.cursor.row < screen.lines.count else { return }
+    let line = screen.lines[screen.cursor.row]
+    guard screen.cursor.col > 0, screen.cursor.col < line.cells.count else { return }
+    if line.cells[screen.cursor.col].isWideTail {
+        screen.cursor.col -= 1
     }
 }

@@ -7,6 +7,7 @@ public final class GhosttyTerminalEmulator: TerminalEmulator, @unchecked Sendabl
     public let state: TerminalState
     private let vtStateMachine: VTStateMachine
     private let keyEncoder = KeyEncoder()
+    public var onDisplayChange: (@Sendable () -> Void)?
 
     /// Called when the terminal needs to send a response back to the host.
     public var onResponse: ((Data) -> Void)? {
@@ -37,10 +38,12 @@ public final class GhosttyTerminalEmulator: TerminalEmulator, @unchecked Sendabl
 
     public func feed(_ data: Data) {
         vtStateMachine.feed(data)
+        onDisplayChange?()
     }
 
     public func resize(columns: Int, rows: Int) {
         state.resize(columns: columns, rows: rows)
+        onDisplayChange?()
     }
 
     public func encodeKey(_ event: KeyEvent) -> Data {

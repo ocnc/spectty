@@ -21,6 +21,9 @@
 - **SSH & Mosh** — connect over SSH or Mosh with automatic reconnection and network roaming
 - **Metal renderer** — GPU-accelerated terminal rendering with CoreText glyph atlas
 - **Session persistence** — Mosh sessions survive app backgrounding and network switches
+- **International input** — native IME composition and basic double-width CJK rendering
+- **Terminal controls** — Meta/Alt shortcuts, remote SGR mouse taps, and persistent helper keys
+- **On-demand rendering** — idle terminals do not continuously submit frames
 - **8 themes** — Default, Catppuccin Mocha, Catppuccin Latte, Tokyo Night, Gruvbox Dark, Dracula, Nord, Monokai
 - **Secure** — passwords and keys stored in the iOS Keychain; Secure Enclave support for key generation
 - **No tracking** — no accounts, no analytics, no data collection
@@ -112,3 +115,11 @@ Requires Xcode 26.2+, iOS 18+ deployment target.
 ```bash
 xcodebuild build -scheme Spectty -destination 'generic/platform=iOS'
 ```
+
+## Contributor acknowledgments
+
+Terminal rendering, keyboard, CJK/IME, mouse tap, port entry, and helper-bar
+improvements were adapted from [jiedo/spectty](https://github.com/jiedo/spectty),
+authored by nandhh. Imported commits retain author credit; adapted changes
+record their source commits and co-author trailers. CJK support currently covers
+common single-scalar characters, not complete Unicode grapheme shaping.

@@ -16,5 +16,6 @@ let package = Package(
             name: "SpecttyUI",
             dependencies: ["SpecttyTerminal"]
         ),
+        .testTarget(name: "SpecttyUITests", dependencies: ["SpecttyUI"]),
     ]
 )

@@ -18,29 +18,11 @@ public struct KeyEncoder: Sendable {
             return Data("\u{1B}[Z".utf8)
         }
 
-        // If the key has printable characters and no special modifiers beyond shift,
-        // just send the characters.
-        if !event.characters.isEmpty && event.modifiers.subtracting(.shift).isEmpty {
-            // Check if it's a special key first.
-            if let special = encodeSpecialKey(event.keyCode, applicationCursor: applicationCursor) {
-                return Data(special.utf8)
-            }
-
-            // Control key combinations.
-            if event.modifiers.contains(.control) {
-                return encodeControl(event.characters)
-            }
-
-            return Data(event.characters.utf8)
-        }
-
-        // Handle control key.
-        if event.modifiers.contains(.control) && !event.characters.isEmpty {
-            return encodeControl(event.characters)
-        }
-
         // Handle special keys (arrows, function keys, etc.).
         if let special = encodeSpecialKey(event.keyCode, applicationCursor: applicationCursor) {
+            if let literal = encodeLiteralSpecialKey(special, modifiers: event.modifiers) {
+                return literal
+            }
             if event.modifiers.isEmpty {
                 return Data(special.utf8)
             }
@@ -48,9 +30,22 @@ public struct KeyEncoder: Sendable {
             return encodeModifiedSpecial(special, modifiers: event.modifiers)
         }
 
-        // Fallback: send characters if we have them.
         if !event.characters.isEmpty {
-            return Data(event.characters.utf8)
+            let data: Data
+
+            // Alt acts as Meta for printable keys: prefix ESC and send the
+            // unmodified printable bytes after control handling if present.
+            if event.modifiers.contains(.control) {
+                data = encodeControl(event.characters)
+            } else {
+                data = Data(event.characters.utf8)
+            }
+
+            if event.modifiers.contains(.alt) {
+                return Data([0x1B]) + data
+            }
+
+            return data
         }
 
         return Data()
@@ -163,11 +158,28 @@ public struct KeyEncoder: Sendable {
         case "\\": return Data([0x1C])
         case "]", "}": return Data([0x1D])
         case "^", "~": return Data([0x1E])
-        case "_": return Data([0x1F])
+        case "_", "/", "?": return Data([0x1F])
         case "@", " ": return Data([0x00])
+        case "2": return Data([0x00])
+        case "3": return Data([0x1B])
+        case "4": return Data([0x1C])
+        case "5": return Data([0x1D])
+        case "6": return Data([0x1E])
+        case "7": return Data([0x1F])
+        case "8": return Data([0x7F])
         default:
             return Data(characters.utf8)
         }
+    }
+
+    private func encodeLiteralSpecialKey(_ special: String, modifiers: KeyModifiers) -> Data? {
+        guard ["\t", "\r", "\u{1B}", "\u{7F}"].contains(special) else { return nil }
+
+        var data = Data(special.utf8)
+        if modifiers.contains(.alt) {
+            data = Data([0x1B]) + data
+        }
+        return data
     }
 
     // MARK: - Modified Special Keys

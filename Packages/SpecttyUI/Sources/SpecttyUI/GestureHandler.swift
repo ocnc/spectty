@@ -14,7 +14,7 @@ public struct EdgeSwipeEvent {
 
 /// Handles gestures on the terminal view: scroll, pinch-to-zoom, selection.
 @MainActor
-public final class GestureHandler: NSObject {
+public final class GestureHandler: NSObject, UIGestureRecognizerDelegate {
     private weak var metalView: TerminalMetalView?
     private weak var emulator: (any TerminalEmulator)?
 
@@ -33,6 +33,10 @@ public final class GestureHandler: NSObject {
     /// Callback for edge-swipe gestures (session switching).
     public var onEdgeSwipe: ((EdgeSwipeEvent) -> Void)?
 
+    /// Callback for local tap fallback when remote mouse handling is inactive.
+    public var onLocalTap: (() -> Void)?
+
+    private var tapGesture: UITapGestureRecognizer?
     private var panGesture: UIPanGestureRecognizer?
     private var leftEdgeGesture: UIScreenEdgePanGestureRecognizer?
     private var rightEdgeGesture: UIScreenEdgePanGestureRecognizer?
@@ -55,7 +59,7 @@ public final class GestureHandler: NSObject {
     /// Remove all gesture recognizers from the metal view.
     public func removeGestures() {
         guard let metalView = metalView else { return }
-        [panGesture, pinchGesture, longPressGesture, twoFingerTapGesture].compactMap { $0 }.forEach {
+        [tapGesture, panGesture, pinchGesture, longPressGesture, twoFingerTapGesture].compactMap { $0 }.forEach {
             metalView.removeGestureRecognizer($0)
         }
         [leftEdgeGesture, rightEdgeGesture].compactMap { $0 }.forEach {
@@ -65,6 +69,12 @@ public final class GestureHandler: NSObject {
 
     private func setupGestures() {
         guard let metalView = metalView else { return }
+
+        // Single tap for remote mouse click or local focus fallback.
+        let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
+        tap.numberOfTouchesRequired = 1
+        metalView.addGestureRecognizer(tap)
+        self.tapGesture = tap
 
         // Pan for scrollback.
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
@@ -104,6 +114,47 @@ public final class GestureHandler: NSObject {
         // Scroll pan defers to edge pans near the edges.
         pan.require(toFail: leftEdge)
         pan.require(toFail: rightEdge)
+
+        // Single-finger tap should not interfere with the two-finger paste gesture.
+        tap.require(toFail: twoFingerTap)
+        for gesture in [tap, pan, pinch, longPress, twoFingerTap, leftEdge, rightEdge] {
+            gesture.delegate = self
+        }
+    }
+
+    public func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        var view = touch.view
+        while let current = view {
+            if current is UIControl || current is TerminalInputAccessory { return false }
+            view = current.superview
+        }
+        return true
+    }
+
+    // MARK: - Tap (Remote Mouse / Local Focus)
+
+    @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
+        guard gesture.state == .ended else { return }
+        guard let metalView else { return }
+        handleTap(at: gesture.location(in: metalView))
+    }
+
+    func handleTap(at point: CGPoint) {
+        guard let metalView, let emulator else { return }
+        let modes = emulator.state.modes
+        guard metalView.terminalContentRect.contains(point) else { return }
+        if metalView.isShowingLiveScreen,
+           modes.contains(.mouseSGR),
+           modes.contains(.mouseButton) || modes.contains(.mouseAny) {
+            let coord = metalView.gridCoordinate(for: point)
+            let x = min(coord.col + 1, emulator.state.columns)
+            let y = min(coord.row + 1, emulator.state.rows)
+            // Keep the click atomic in the existing outbound queue.
+            onMouseEvent?(Data("\u{1B}[<0;\(x);\(y)M\u{1B}[<0;\(x);\(y)m".utf8))
+            metalView.becomeFirstResponder()
+            return
+        }
+        onLocalTap?()
     }
 
     // MARK: - Pan (Scroll)
@@ -164,12 +215,17 @@ public final class GestureHandler: NSObject {
     // MARK: - Long Press (Selection)
 
     @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
-        guard let metalView = metalView else { return }
+        guard let metalView = metalView, let emulator = emulator else { return }
 
         let point = gesture.location(in: metalView)
         let coord = metalView.gridCoordinate(for: point)
         let row = coord.row
-        let col = coord.col
+        var col = coord.col
+        if col > 0, row >= 0, row < emulator.state.rows,
+           col < emulator.state.activeScreen.lines[row].cells.count,
+           emulator.state.activeScreen.lines[row].cells[col].isWideTail {
+            col -= 1
+        }
 
         switch gesture.state {
         case .began:

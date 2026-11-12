@@ -20,6 +20,7 @@ struct TerminalSessionView: View {
                 themeName: colorScheme,
                 cursorStyle: CursorStyle(rawValue: cursorStyle) ?? .block,
                 autoFocus: autoFocus,
+                inputEnabled: isConnected,
                 onKeyInput: { event in
                     session.sendKey(event)
                 },
@@ -35,6 +36,11 @@ struct TerminalSessionView: View {
             // Connection status overlay.
             connectionOverlay
         }
+    }
+
+    private var isConnected: Bool {
+        if case .connected = session.transportState { return true }
+        return false
     }
 
     @ViewBuilder

@@ -297,9 +297,27 @@ public final class TextSelectionView: UIView {
 
     // MARK: - Text Extraction
 
+    private func normalizedSelection(_ selection: TerminalSelection, in state: TerminalScreenState) -> TerminalSelection {
+        var normalized = selection.normalized
+        normalized.startCol = normalizeColumn(normalized.startCol, row: normalized.startRow, in: state)
+        normalized.endCol = normalizeColumn(normalized.endCol, row: normalized.endRow, in: state)
+        return normalized.normalized
+    }
+
+    private func normalizeColumn(_ col: Int, row: Int, in state: TerminalScreenState) -> Int {
+        guard row >= 0 && row < state.rows else { return col }
+        let line = state.lines[row]
+        guard col > 0 && col < line.cells.count else { return col }
+        if line.cells[col].isWideTail {
+            return col - 1
+        }
+        return col
+    }
+
     /// Extract selected text from the terminal state.
     public func selectedText(from state: TerminalScreenState) -> String? {
-        guard let selection = selection?.normalized else { return nil }
+        guard let rawSelection = selection else { return nil }
+        let selection = normalizedSelection(rawSelection, in: state)
 
         var text = ""
         for row in selection.startRow...selection.endRow {
@@ -308,8 +326,15 @@ public final class TextSelectionView: UIView {
             let startCol = (row == selection.startRow) ? selection.startCol : 0
             let endCol = (row == selection.endRow) ? selection.endCol : state.columns - 1
 
-            for col in startCol...min(endCol, line.cells.count - 1) {
-                text.append(line.cells[col].character)
+            var col = startCol
+            while col <= min(endCol, line.cells.count - 1) {
+                let cell = line.cells[col]
+                if cell.isWideTail {
+                    col += 1
+                    continue
+                }
+                text.append(cell.character)
+                col += cell.isWideHead ? 2 : 1
             }
 
             if row < selection.endRow {
