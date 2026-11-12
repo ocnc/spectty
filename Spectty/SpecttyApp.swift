@@ -4,6 +4,7 @@ import SwiftData
 @main
 struct SpecttyApp: App {
     @State private var sessionManager = SessionManager()
+    @State private var voiceInput = VoiceInputStore()
     @State private var lockManager = PrivacyLockManager()
     @Environment(\.scenePhase) private var scenePhase
 
@@ -27,7 +28,9 @@ struct SpecttyApp: App {
             ContentRoot()
                 .environment(sessionManager)
                 .environment(lockManager)
+                .environment(voiceInput)
                 .task {
+                    voiceInput.verifyExistingDownload()
                     await sessionManager.autoResumeSessions()
                 }
         }
@@ -40,6 +43,7 @@ struct SpecttyApp: App {
                 }
             }
             if newPhase == .background {
+                voiceInput.cancelDownload()
                 Task { @MainActor in
                     await sessionManager.saveActiveSessions()
                     lockManager.appDidEnterBackground()

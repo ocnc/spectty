@@ -14,6 +14,7 @@
 		A0000001AAAA000000000005 /* AcknowList in Frameworks */ = {isa = PBXBuildFile; productRef = A0000002AAAA000000000005 /* AcknowList */; };
 		A0000001AAAA000000000006 /* Package.resolved in Resources */ = {isa = PBXBuildFile; fileRef = A0000004AAAA000000000001 /* Package.resolved */; };
 		B0000004AAAA000000000001 /* XCTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B0000003AAAA000000000001 /* XCTest.framework */; };
+		C0000001AAAA000000000001 /* SpecttySpeech in Frameworks */ = {isa = PBXBuildFile; productRef = C0000002AAAA000000000001 /* SpecttySpeech */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -56,6 +57,7 @@
 				A0000001AAAA000000000003 /* SpecttyUI in Frameworks */,
 				A0000001AAAA000000000004 /* SpecttyKeychain in Frameworks */,
 				A0000001AAAA000000000005 /* AcknowList in Frameworks */,
+				C0000001AAAA000000000001 /* SpecttySpeech in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -114,6 +116,7 @@
 				A0000002AAAA000000000003 /* SpecttyUI */,
 				A0000002AAAA000000000004 /* SpecttyKeychain */,
 				A0000002AAAA000000000005 /* AcknowList */,
+				C0000002AAAA000000000001 /* SpecttySpeech */,
 			);
 			productName = Spectty;
 			productReference = 8E69C2322F40460400614CEC /* Spectty.app */;
@@ -176,6 +179,7 @@
 				A0000003AAAA000000000003 /* XCLocalSwiftPackageReference "Packages/SpecttyUI" */,
 				A0000003AAAA000000000004 /* XCLocalSwiftPackageReference "Packages/SpecttyKeychain" */,
 				A0000003AAAA000000000005 /* XCRemoteSwiftPackageReference "AcknowList" */,
+				C0000003AAAA000000000001 /* XCLocalSwiftPackageReference "Packages/SpecttySpeech" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 8E69C2332F40460400614CEC /* Products */;
@@ -528,6 +532,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/SpecttyKeychain;
 		};
+		C0000003AAAA000000000001 /* XCLocalSwiftPackageReference "Packages/SpecttySpeech" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/SpecttySpeech;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
@@ -562,6 +570,10 @@
 			isa = XCSwiftPackageProductDependency;
 			package = A0000003AAAA000000000005 /* XCRemoteSwiftPackageReference "AcknowList" */;
 			productName = AcknowList;
+		};
+		C0000002AAAA000000000001 /* SpecttySpeech */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SpecttySpeech;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

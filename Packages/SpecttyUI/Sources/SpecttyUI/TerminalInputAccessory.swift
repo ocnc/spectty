@@ -1,30 +1,33 @@
 import UIKit
 import SpecttyTerminal
 
-/// Two-row input accessory providing common terminal keys above the iOS
-/// software keyboard.
+/// Compact terminal keys and optional voice input above the software keyboard.
 public final class TerminalInputAccessory: UIInputView {
     /// Callback when a virtual key is pressed.
     public var onKeyPress: ((KeyEvent) -> Void)?
-    /// Callback when the software keyboard should be shown or hidden.
-    public var onKeyboardToggle: (() -> Void)?
+    static let barHeight: CGFloat = 52
+
+    public var onVoiceInput: (() -> Void)? {
+        didSet { voiceButton?.isHidden = onVoiceInput == nil }
+    }
+    private var voiceButton: UIButton?
+    private var expandButton: UIButton?
+    private var navigationRow: UIStackView?
+    private var expanded = false
 
     /// Whether Ctrl modifier is active (toggleable).
     public private(set) var ctrlActive = false
     /// Whether Shift modifier is active (toggleable).
     public private(set) var shiftActive = false
-    /// Whether the software keyboard is currently visible.
-    public var softwareKeyboardVisible = true {
-        didSet {
-            updateKeyboardToggleButton()
-        }
-    }
-
+    public private(set) var altActive = false
     private let stackView = UIStackView()
     private var ctrlButton: UIButton?
     private var shiftButton: UIButton?
-    private var keyboardToggleButton: UIButton?
-    private let haptic = UIImpactFeedbackGenerator(style: .rigid)
+    private var altButton: UIButton?
+    private var buttons: [UIButton] = []
+    private var keyGroups: [UIView] = []
+    private var foreground = UIColor.white
+    private let haptic = UIImpactFeedbackGenerator(style: .soft)
 
     public init(frame: CGRect) {
         super.init(frame: frame, inputViewStyle: .keyboard)
@@ -46,104 +49,128 @@ public final class TerminalInputAccessory: UIInputView {
         stackView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stackView)
 
-        let heightConstraint = heightAnchor.constraint(equalToConstant: 100)
-        heightConstraint.priority = .defaultHigh
-
         NSLayoutConstraint.activate([
-            heightConstraint,
             stackView.topAnchor.constraint(equalTo: topAnchor, constant: 4),
             stackView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4),
-            stackView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
-            stackView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
+            stackView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            stackView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
         ])
 
-        let firstRowKeys: [(String, KeyButtonAction)] = [
-            ("Esc", .escape),
-            ("Tab", .tab),
-            ("Ctrl", .toggleCtrl),
-            ("Shift", .toggleShift),
-            ("\u{2190}", .arrowLeft),   // ←
-            ("\u{2193}", .arrowDown),   // ↓
-            ("\u{2191}", .arrowUp),     // ↑
-            ("\u{2192}", .arrowRight),  // →
-        ]
-        addRow(firstRowKeys)
+        let navigation = makeRow([
+            ("Alt", .toggleAlt), ("←", .arrowLeft), ("↓", .arrowDown),
+            ("↑", .arrowUp), ("→", .arrowRight), ("Newline", .newline)
+        ])
+        navigation.distribution = .fillEqually
+        styleKeyGroup(navigation)
+        navigation.isHidden = true
+        navigationRow = navigation
+        stackView.addArrangedSubview(navigation)
 
-        let secondRowKeys: [(String, KeyButtonAction)] = [
-            ("Del", .deleteForward),
-            ("PgUp", .pageUp),
-            ("PgDn", .pageDown),
-            ("Hide KB", .toggleSoftwareKeyboard),
-        ]
-        addRow(secondRowKeys)
-        updateKeyboardToggleButton()
+        let main = UIStackView()
+        main.axis = .horizontal
+        main.spacing = 6
+        let shortcuts = makeRow([("Esc", .escape), ("Tab", .tab), ("Ctrl", .toggleCtrl), ("Shift", .toggleShift)])
+        styleKeyGroup(shortcuts)
+        main.addArrangedSubview(shortcuts)
+        main.addArrangedSubview(UIView())
+        main.addArrangedSubview(makeButton(title: "More keys", action: .expand))
+        let mic = makeButton(title: "Voice input", action: .voiceInput)
+        voiceButton = mic
+        mic.isHidden = onVoiceInput == nil
+        main.addArrangedSubview(mic)
+        stackView.addArrangedSubview(main)
+        setTheme(.default)
     }
 
     public override var intrinsicContentSize: CGSize {
-        CGSize(width: UIView.noIntrinsicMetric, height: 100)
+        CGSize(width: UIView.noIntrinsicMetric, height: expanded ? 100 : Self.barHeight)
     }
 
     // MARK: - Button Factory
 
     private enum KeyButtonAction {
+        case expand
+        case voiceInput
         case escape
         case tab
-        case deleteForward
-        case pageUp
-        case pageDown
         case toggleCtrl
         case toggleShift
-        case toggleSoftwareKeyboard
+        case toggleAlt
+        case newline
         case arrowUp
         case arrowDown
         case arrowLeft
         case arrowRight
     }
 
-    private func addRow(_ keys: [(String, KeyButtonAction)]) {
+    private func makeRow(_ keys: [(String, KeyButtonAction)]) -> UIStackView {
         let row = UIStackView()
         row.axis = .horizontal
-        row.spacing = 5
-        row.alignment = .fill
-        row.distribution = .fillEqually
-
+        row.spacing = 4
         for (title, action) in keys {
             let button = makeButton(title: title, action: action)
             row.addArrangedSubview(button)
-
             if case .toggleCtrl = action { ctrlButton = button }
             if case .toggleShift = action { shiftButton = button }
-            if case .toggleSoftwareKeyboard = action { keyboardToggleButton = button }
+            if case .toggleAlt = action { altButton = button }
         }
-
-        stackView.addArrangedSubview(row)
+        return row
     }
 
     private func makeButton(title: String, action: KeyButtonAction) -> UIButton {
-        var config = UIButton.Configuration.filled()
+        var config = UIButton.Configuration.plain()
         config.title = title
-        config.baseForegroundColor = .label
-        config.baseBackgroundColor = .systemGray4
-        config.cornerStyle = .medium
-        config.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 2, bottom: 6, trailing: 2)
+        config.baseForegroundColor = .secondaryLabel
+        config.cornerStyle = .capsule
+        config.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 8, bottom: 6, trailing: 8)
         config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
             var out = incoming
-            out.font = UIFont.systemFont(ofSize: 15, weight: .semibold)
+            out.font = UIFont.monospacedSystemFont(ofSize: 14, weight: .medium)
             return out
         }
 
+        config.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(pointSize: 16, weight: .medium)
         let button = UIButton(configuration: config)
+        buttons.append(button)
+        let width = button.widthAnchor.constraint(greaterThanOrEqualToConstant: 44)
+        width.priority = .defaultHigh
+        width.isActive = true
+        let height = button.heightAnchor.constraint(equalToConstant: 44)
+        height.priority = .defaultHigh
+        height.isActive = true
         switch action {
+        case .expand:
+            expandButton = button
+            button.configuration?.title = nil
+            button.configuration?.image = UIImage(systemName: "keyboard")
+            button.accessibilityLabel = "Show navigation keys"
+            button.accessibilityValue = "Collapsed"
+        case .voiceInput:
+            button.configuration?.title = nil
+            button.configuration?.image = UIImage(systemName: "mic.fill")
+            button.accessibilityLabel = "Voice input"
         case .escape: button.accessibilityLabel = "Escape"
-        case .deleteForward: button.accessibilityLabel = "Delete forward"
-        case .pageUp: button.accessibilityLabel = "Page up"
-        case .pageDown: button.accessibilityLabel = "Page down"
         case .arrowUp: button.accessibilityLabel = "Up arrow"
         case .arrowDown: button.accessibilityLabel = "Down arrow"
         case .arrowLeft: button.accessibilityLabel = "Left arrow"
         case .arrowRight: button.accessibilityLabel = "Right arrow"
         case .toggleCtrl: button.accessibilityLabel = "Control"
+        case .newline: button.accessibilityLabel = "Newline (Control J)"
         default: button.accessibilityLabel = title
+        }
+        let symbol: String?
+        switch action {
+        case .arrowUp: symbol = "arrow.up"
+        case .arrowDown: symbol = "arrow.down"
+        case .arrowLeft: symbol = "arrow.left"
+        case .arrowRight: symbol = "arrow.right"
+        case .toggleShift: symbol = "shift"
+        case .newline: symbol = "return"
+        default: symbol = nil
+        }
+        if let symbol {
+            button.configuration?.title = nil
+            button.configuration?.image = UIImage(systemName: symbol)
         }
         let handler = UIAction { [weak self] _ in
             self?.handleAction(action)
@@ -151,6 +178,24 @@ public final class TerminalInputAccessory: UIInputView {
         button.addAction(handler, for: .touchUpInside)
 
         return button
+    }
+
+    private func styleKeyGroup(_ group: UIView) {
+        group.layer.cornerRadius = 16
+        group.layer.cornerCurve = .continuous
+        keyGroups.append(group)
+    }
+
+    func setTheme(_ theme: TerminalTheme) {
+        let background = UIColor(red: CGFloat(theme.background.0) / 255, green: CGFloat(theme.background.1) / 255, blue: CGFloat(theme.background.2) / 255, alpha: 1)
+        foreground = UIColor(red: CGFloat(theme.foreground.0) / 255, green: CGFloat(theme.foreground.1) / 255, blue: CGFloat(theme.foreground.2) / 255, alpha: 1)
+        backgroundColor = background
+        for group in keyGroups { group.backgroundColor = foreground.withAlphaComponent(0.06) }
+        for button in buttons { button.configuration?.baseForegroundColor = foreground.withAlphaComponent(0.85) }
+        expandButton?.configuration?.background.backgroundColor = foreground.withAlphaComponent(0.06)
+        voiceButton?.configuration?.background.backgroundColor = foreground
+        voiceButton?.configuration?.baseForegroundColor = background
+        updateModifierButtons()
     }
 
     // MARK: - Key Actions
@@ -161,22 +206,32 @@ public final class TerminalInputAccessory: UIInputView {
         var modifiers = KeyModifiers()
         if ctrlActive { modifiers.insert(.control) }
         if shiftActive { modifiers.insert(.shift) }
+        if altActive { modifiers.insert(.alt) }
 
         switch action {
+        case .expand:
+            expanded.toggle()
+            if !expanded { deactivateModifiers() }
+            navigationRow?.isHidden = !expanded
+            expandButton?.configuration?.image = UIImage(systemName: expanded ? "keyboard.chevron.compact.down" : "keyboard")
+            expandButton?.accessibilityLabel = expanded ? "Hide navigation keys" : "Show navigation keys"
+            expandButton?.accessibilityValue = expanded ? "Expanded" : "Collapsed"
+            invalidateIntrinsicContentSize()
+            superview?.setNeedsLayout()
+        case .newline:
+            sendKey(keyCode: 0, characters: "\n", modifiers: [.control])
+            deactivateModifiers()
+        case .toggleAlt:
+            altActive.toggle()
+            updateModifierButtons()
+        case .voiceInput:
+            deactivateModifiers()
+            onVoiceInput?()
         case .escape:
             sendKey(keyCode: 0x29, characters: "\u{1B}", modifiers: modifiers)
             deactivateModifiers()
         case .tab:
             sendKey(keyCode: 0x2B, characters: "\t", modifiers: modifiers)
-            deactivateModifiers()
-        case .deleteForward:
-            sendKey(keyCode: 0x4C, characters: "", modifiers: modifiers)
-            deactivateModifiers()
-        case .pageUp:
-            sendKey(keyCode: 0x4B, characters: "", modifiers: modifiers)
-            deactivateModifiers()
-        case .pageDown:
-            sendKey(keyCode: 0x4E, characters: "", modifiers: modifiers)
             deactivateModifiers()
         case .toggleCtrl:
             ctrlActive.toggle()
@@ -184,9 +239,6 @@ public final class TerminalInputAccessory: UIInputView {
         case .toggleShift:
             shiftActive.toggle()
             updateModifierButtons()
-        case .toggleSoftwareKeyboard:
-            deactivateModifiers()
-            onKeyboardToggle?()
         case .arrowUp:
             sendKey(keyCode: 0x52, characters: "", modifiers: modifiers)
             deactivateModifiers()
@@ -215,31 +267,23 @@ public final class TerminalInputAccessory: UIInputView {
     public func deactivateModifiers() {
         ctrlActive = false
         shiftActive = false
+        altActive = false
         updateModifierButtons()
     }
 
     private func updateModifierButtons() {
         updateButtonHighlight(ctrlButton, active: ctrlActive)
         updateButtonHighlight(shiftButton, active: shiftActive)
-    }
-
-    private func updateKeyboardToggleButton() {
-        guard let keyboardToggleButton else { return }
-        var config = keyboardToggleButton.configuration ?? .filled()
-        config.title = softwareKeyboardVisible ? "Hide KB" : "Show KB"
-        keyboardToggleButton.configuration = config
-        keyboardToggleButton.accessibilityLabel = softwareKeyboardVisible ? "Hide keyboard" : "Show keyboard"
+        updateButtonHighlight(altButton, active: altActive)
     }
 
     private func updateButtonHighlight(_ button: UIButton?, active: Bool) {
         guard let button else { return }
         button.accessibilityValue = active ? "On" : "Off"
         if active { button.accessibilityTraits.insert(.selected) } else { button.accessibilityTraits.remove(.selected) }
-        var config = button.configuration ?? .filled()
-        config.baseBackgroundColor = active
-            ? .systemBlue
-            : .systemGray4
-        config.baseForegroundColor = active ? .white : .label
+        var config = button.configuration ?? .plain()
+        config.background.backgroundColor = active ? foreground.withAlphaComponent(0.2) : .clear
+        config.baseForegroundColor = active ? foreground : foreground.withAlphaComponent(0.85)
         button.configuration = config
     }
 }

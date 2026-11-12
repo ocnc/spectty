@@ -10,6 +10,26 @@ struct AcknowledgementsView: View {
         let auto = AcknowParser.defaultAcknowList()?.acknowledgements ?? []
         let manual = [
             Acknow(
+                title: "FluidAudio",
+                text: (Bundle.main.url(forResource: "FluidAudio-LICENSE", withExtension: "txt")
+                    .flatMap { try? String(contentsOf: $0, encoding: .utf8) }) ?? "Apache License 2.0 — https://www.apache.org/licenses/LICENSE-2.0",
+                repository: URL(string: "https://github.com/FluidInference/FluidAudio")
+            ),
+            Acknow(
+                title: "Parakeet Ultra",
+                text: """
+                Parakeet Ultra by Moondream, derived from NVIDIA Parakeet TDT 0.6B v3.
+                Core ML conversion by FluidInference. Spectty downloads these weights without modifications.
+
+                Creative Commons Attribution 4.0 International (CC BY 4.0)
+                https://creativecommons.org/licenses/by/4.0/
+
+                Original model: https://huggingface.co/moondream/parakeet-ultra
+                Base model: https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3
+                """,
+                repository: URL(string: "https://huggingface.co/FluidInference/parakeet-ultra-coreml")
+            ),
+            Acknow(
                 title: "Ghostty",
                 text: """
                 MIT License

@@ -86,7 +86,31 @@ Keyboard → KeyEncoder → Transport → Remote Server
 | `SpecttyTerminal` | VT100/xterm state machine, cell model, scrollback buffer, key encoder |
 | `SpecttyTransport` | SSH (SwiftNIO SSH) and Mosh transports behind `TerminalTransport` protocol |
 | `SpecttyUI` | Metal renderer with CoreText glyph atlas, SwiftUI wrapper, input accessory bar, gestures |
+| `SpecttySpeech` | Optional Parakeet Ultra download, integrity verification, storage/network policy, and local speech inference |
 | `SpecttyKeychain` | iOS Keychain key storage, Ed25519/ECDSA/Secure Enclave generation, OpenSSH PEM import |
+
+## Voice Input
+
+Enable voice in Settings → Voice. Downloads use Wi-Fi unless you explicitly allow
+cellular data for that attempt; Low Data Mode is respected. Keep Spectty open during
+setup. Retry resumes supported partial transfers and reuses verified files.
+
+In a connected terminal, tap the microphone in the bottom input bar, speak, tap Stop Recording, review, then Insert Text.
+Insertion does not send Return. Disabling voice retains the model; Remove Download
+deletes it. Existing downloads are verified locally when upgrading.
+
+`SpecttySpeech` bundles an immutable Ultra revision and SHA-256 manifest in
+`Resources/Ultra.json`. Changing models requires updating that manifest and testing
+the matching artifacts. Installation verifies every file before Core ML loading and
+writes the revision marker only after preparation succeeds. It checks available
+storage for missing files plus a 1 GB preparation reserve; device-specific cache
+requirements may still vary. Models are excluded from backups.
+
+Run `python3 scripts/test-speech.py` to test installation and cancellation/resume
+against a local HTTP fixture without downloading model weights.
+
+The compact terminal bar keeps Esc, Tab, Ctrl, and Shift visible. The keyboard
+button expands Alt, arrows, and Newline (Ctrl+J). Modifiers apply to the next key.
 
 ## Mosh Implementation
 

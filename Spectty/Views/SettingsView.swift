@@ -51,6 +51,8 @@ struct SettingsView: View {
                 Toggle("Allow Remote Clipboard Read (OSC 52)", isOn: $allowRemoteClipboardRead)
             }
 
+            VoiceInputSettingsSection()
+
             Section("Security") {
                 Toggle("Privacy Mode", isOn: $privacyModeEnabled)
                     .onChange(of: privacyModeEnabled) { _, enabled in
