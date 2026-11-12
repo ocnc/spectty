@@ -28,6 +28,20 @@ final class WideCharacterTests: XCTestCase {
         assertPairs(emulator)
     }
 
+    func testEraseAndDeleteFromWideTailKeepOriginalColumnRange() {
+        for (operation, expected) in [
+            ("X", "  ab"), ("P", " ab"),
+            ("2X", "   b"), ("2P", " b"),
+            ("99X", ""), ("99P", "")
+        ] {
+            let emulator = GhosttyTerminalEmulator(columns: 8, rows: 2)
+            emulator.feed(Data("中ab\u{1b}[2G\u{1b}[\(operation)".utf8))
+            XCTAssertEqual(emulator.state.activeScreen.text(), expected, operation)
+            XCTAssertEqual(emulator.state.activeScreen.cursor.col, 1, operation)
+            assertPairs(emulator)
+        }
+    }
+
     private func assertPairs(_ emulator: GhosttyTerminalEmulator, file: StaticString = #filePath, line: UInt = #line) {
         for row in emulator.state.activeScreen.lines {
             for index in row.cells.indices {

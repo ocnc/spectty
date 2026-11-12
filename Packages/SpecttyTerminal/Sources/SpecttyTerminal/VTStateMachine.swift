@@ -1145,7 +1145,7 @@ public final class VTStateMachine: @unchecked Sendable {
         let s = screen
         let row = s.cursor.row
         guard row >= 0 && row < s.rows else { return }
-        let start = normalizedCursorColumn()
+        let start = s.cursor.col
         let n = min(count, s.columns - start)
         let end = min(start + n, s.columns)
         for col in start..<end {
@@ -1178,7 +1178,7 @@ public final class VTStateMachine: @unchecked Sendable {
         let s = screen
         let row = s.cursor.row
         guard row >= 0 && row < s.rows else { return }
-        let start = normalizedCursorColumn()
+        let start = s.cursor.col
         let end = min(start + count, s.columns)
         for col in start..<end {
             eraseCell(row: row, col: col)
