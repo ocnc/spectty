@@ -9,6 +9,8 @@ final class TerminalIMETextField: UITextField {
     var routePresses: ((Set<UIPress>, UIPressesEvent?, Bool) -> Set<UIPress>)?
     var onPaste: (() -> Void)?
     var onCopy: (() -> Void)?
+    var canCopy: (() -> Bool)?
+    var canPaste: (() -> Bool)?
 
     override var inputAccessoryView: UIView? {
         get { accessoryProvider?() }
@@ -61,6 +63,12 @@ final class TerminalIMETextField: UITextField {
 
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool { false }
 
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        if action == #selector(copy(_:)) { return canCopy?() == true }
+        if action == #selector(paste(_:)) { return canPaste?() == true }
+        return super.canPerformAction(action, withSender: sender)
+    }
+
     override func paste(_ sender: Any?) { onPaste?() }
     override func copy(_ sender: Any?) { onCopy?() }
 }
@@ -79,6 +87,21 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
     private weak var terminalEmulator: (any TerminalEmulator)?
     private var scrollOffset: Int = 0
     var isShowingLiveScreen: Bool { inputEnabled && scrollOffset == 0 && selectionView.selection == nil }
+    var visibleLines: [TerminalLine] {
+        guard let emulator = terminalEmulator else { return [] }
+        return TerminalText.visibleLines(state: emulator.state.activeScreen, scrollback: emulator.state.scrollback, scrollOffset: scrollOffset)
+    }
+    var pasteboard: UIPasteboard = .general
+    var openURL: (URL) -> Void = { UIApplication.shared.open($0) }
+
+    func openLink(at point: CGPoint) -> Bool {
+        guard selectionView.selection == nil else { return false }
+        let coord = gridCoordinate(for: point)
+        guard let link = TerminalText.link(atRow: coord.row, col: coord.col, in: visibleLines) else { return false }
+        openURL(link.url)
+        return true
+    }
+
     private let feedbackGenerator = UIImpactFeedbackGenerator(style: .light)
     private lazy var _inputAccessory: TerminalInputAccessory = {
         let bar = TerminalInputAccessory(frame: CGRect(x: 0, y: 0, width: bounds.width, height: TerminalInputAccessory.barHeight))
@@ -193,6 +216,8 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
         }
         imeTextField.onPaste = { [weak self] in self?.handlePaste() }
         imeTextField.onCopy = { [weak self] in self?.copyScreenText() }
+        imeTextField.canCopy = { [weak self] in self?.selectionView.selection != nil }
+        imeTextField.canPaste = { [weak self] in self?.inputEnabled == true && self?.pasteboard.hasStrings == true }
         imeTextField.addAction(UIAction { [weak self] _ in self?.handleIMETextChanged() }, for: .editingChanged)
         addSubview(imeTextField)
         preeditLabel.isUserInteractionEnabled = false
@@ -215,9 +240,8 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
             NotificationCenter.default.addObserver(self, selector: #selector(keyboardChanged), name: name, object: nil)
         }
 
-        // Edit menu interaction for copy/paste — nil delegate uses default
-        // behavior, building the menu from canPerformAction/copy/paste.
-        let interaction = UIEditMenuInteraction(delegate: nil)
+        // Build actions explicitly because keyboard focus belongs to the hidden IME field.
+        let interaction = UIEditMenuInteraction(delegate: self)
         addInteraction(interaction)
         self.editMenuInteraction = interaction
 
@@ -251,8 +275,7 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
     private func handleLocalTap() {
         // Clear any active selection on tap before focusing the terminal.
         if selectionView.selection != nil {
-            selectionView.selection = nil
-            editMenuInteraction?.dismissMenu()
+            clearSelection()
         }
 
         if !isFirstResponder {
@@ -270,6 +293,7 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
         self.terminalEmulator = emulator
         installDisplayChangeHandler(for: emulator)
         self.scrollOffset = 0
+        clearSelection()
         gestureHandler?.removeGestures()
         setupGestureHandler(emulator: emulator)
         // Reset so the new emulator gets the current grid size.
@@ -559,16 +583,16 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
 
     public override var keyCommands: [UIKeyCommand]? {
         [
-            UIKeyCommand(input: "v", modifierFlags: .command, action: #selector(handlePaste)),
+            UIKeyCommand(input: "v", modifierFlags: .command, action: #selector(paste(_:))),
             UIKeyCommand(input: "k", modifierFlags: .command, action: #selector(handleClearScreen)),
-            UIKeyCommand(input: "c", modifierFlags: .command, action: #selector(handleCopy)),
+            UIKeyCommand(input: "c", modifierFlags: .command, action: #selector(copy(_:))),
         ]
     }
 
     @objc private func handlePaste() {
         guard inputEnabled else { return }
         cancelIMEComposition()
-        guard let text = UIPasteboard.general.string else { return }
+        guard let text = pasteboard.string else { return }
         onPaste?(TerminalPaste.data(for: text, bracketed: terminalEmulator?.state.modes.contains(.bracketedPaste) == true))
     }
 
@@ -578,33 +602,36 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
         onKeyInput?(event)
     }
 
-    @objc private func handleCopy() {
-        copyScreenText()
+    private func clearSelection() {
+        selectionView.selection = nil
+        gestureHandler?.updateSelection(nil)
+        editMenuInteraction?.dismissMenu()
     }
 
     private func copyScreenText() {
-        guard let emulator = terminalEmulator else { return }
-
-        // If there's an active selection, copy only the selected text.
-        if selectionView.selection != nil,
-           let selectedText = selectionView.selectedText(from: emulator.state.activeScreen),
-           !selectedText.isEmpty {
-            UIPasteboard.general.string = selectedText
-            selectionView.selection = nil
-            return
-        }
-
-        // Fallback: copy entire visible screen.
-        let text = emulator.state.activeScreen.text()
-        guard !text.isEmpty else { return }
-        UIPasteboard.general.string = text
+        guard !visibleLines.isEmpty else { return }
+        if selectionView.selection == nil { selectAll(nil) }
+        guard let text = selectionView.selectedText(from: visibleLines), !text.isEmpty else { return }
+        pasteboard.string = text
+        clearSelection()
     }
 
     // MARK: - UIResponder Copy/Paste Menu
 
     public override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
         if action == #selector(copy(_:)) { return selectionView.selection != nil }
+        if action == #selector(paste(_:)) { return inputEnabled && pasteboard.hasStrings }
+        if action == #selector(selectAll(_:)) { return !visibleLines.isEmpty }
+        if action == #selector(handleClearScreen) { return inputEnabled }
         return false
+    }
+
+    @objc public override func selectAll(_ sender: Any?) {
+        let lines = visibleLines
+        guard let endRow = lines.lastIndex(where: { !$0.textContent().isEmpty }) else { return }
+        let selection = TerminalSelection(startRow: 0, startCol: 0, endRow: endRow, endCol: max(0, lines[endRow].cells.count - 1))
+        selectionView.selection = selection
+        gestureHandler?.updateSelection(selection)
     }
 
     @objc public override func copy(_ sender: Any?) {
@@ -674,11 +701,13 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
     public func scrollBy(_ lines: Int) {
         guard let emulator = terminalEmulator else { return }
         let maxScroll = emulator.scrollbackCount
+        clearSelection()
         scrollOffset = max(0, min(scrollOffset + lines, maxScroll))
         setNeedsDisplay()
     }
 
     public func scrollToBottom() {
+        clearSelection()
         scrollOffset = 0
         setNeedsDisplay()
     }
@@ -868,5 +897,28 @@ extension TerminalMetalView: UITextFieldDelegate {
             return false
         }
         return true
+    }
+}
+
+extension TerminalMetalView: @preconcurrency UIEditMenuInteractionDelegate {
+    public func editMenuInteraction(_ interaction: UIEditMenuInteraction, menuFor configuration: UIEditMenuConfiguration, suggestedActions: [UIMenuElement]) -> UIMenu? {
+        var actions: [UIMenuElement] = []
+        if let selection = selectionView.selection?.normalized,
+           let link = TerminalText.link(atRow: selection.startRow, col: selection.startCol, in: visibleLines),
+           link.selection == selection {
+            actions.append(UIAction(title: "Open Link", image: UIImage(systemName: "safari")) { [weak self] _ in self?.openURL(link.url) })
+        }
+        if selectionView.selection != nil {
+            actions.append(UIAction(title: "Copy", image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in self?.copy(nil) })
+        }
+        if inputEnabled && pasteboard.hasStrings {
+            actions.append(UIAction(title: "Paste", image: UIImage(systemName: "doc.on.clipboard")) { [weak self] _ in self?.paste(nil) })
+        }
+        actions.append(UIAction(title: "Select All") { [weak self] _ in
+            guard let self else { return }
+            self.selectAll(nil)
+            self.presentEditMenu(at: configuration.sourcePoint)
+        })
+        return UIMenu(children: actions)
     }
 }

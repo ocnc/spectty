@@ -297,16 +297,16 @@ public final class TextSelectionView: UIView {
 
     // MARK: - Text Extraction
 
-    private func normalizedSelection(_ selection: TerminalSelection, in state: TerminalScreenState) -> TerminalSelection {
+    private func normalizedSelection(_ selection: TerminalSelection, in lines: [TerminalLine]) -> TerminalSelection {
         var normalized = selection.normalized
-        normalized.startCol = normalizeColumn(normalized.startCol, row: normalized.startRow, in: state)
-        normalized.endCol = normalizeColumn(normalized.endCol, row: normalized.endRow, in: state)
+        normalized.startCol = normalizeColumn(normalized.startCol, row: normalized.startRow, in: lines)
+        normalized.endCol = normalizeColumn(normalized.endCol, row: normalized.endRow, in: lines)
         return normalized.normalized
     }
 
-    private func normalizeColumn(_ col: Int, row: Int, in state: TerminalScreenState) -> Int {
-        guard row >= 0 && row < state.rows else { return col }
-        let line = state.lines[row]
+    private func normalizeColumn(_ col: Int, row: Int, in lines: [TerminalLine]) -> Int {
+        guard row >= 0 && row < lines.count else { return col }
+        let line = lines[row]
         guard col > 0 && col < line.cells.count else { return col }
         if line.cells[col].isWideTail {
             return col - 1
@@ -316,18 +316,22 @@ public final class TextSelectionView: UIView {
 
     /// Extract selected text from the terminal state.
     public func selectedText(from state: TerminalScreenState) -> String? {
+        return selectedText(from: state.lines)
+    }
+
+    func selectedText(from lines: [TerminalLine]) -> String? {
         guard let rawSelection = selection else { return nil }
-        let selection = normalizedSelection(rawSelection, in: state)
+        let selection = normalizedSelection(rawSelection, in: lines)
 
         var text = ""
         for row in selection.startRow...selection.endRow {
-            guard row >= 0 && row < state.rows else { continue }
-            let line = state.lines[row]
+            guard row >= 0 && row < lines.count else { continue }
+            let line = lines[row]
             let startCol = (row == selection.startRow) ? selection.startCol : 0
-            let endCol = (row == selection.endRow) ? selection.endCol : state.columns - 1
+            let endCol = (row == selection.endRow) ? selection.endCol : line.cells.count - 1
 
-            var col = startCol
-            while col <= min(endCol, line.cells.count - 1) {
+            var col = max(0, startCol)
+            while col <= min(endCol, min(line.cells.count, line.wrappedColumns ?? line.cells.count) - 1) {
                 let cell = line.cells[col]
                 if cell.isWideTail {
                     col += 1
@@ -337,14 +341,14 @@ public final class TextSelectionView: UIView {
                 col += cell.isWideHead ? 2 : 1
             }
 
-            if row < selection.endRow {
+            if row < selection.endRow, line.wrappedColumns == nil {
                 text.append("\n")
             }
         }
 
         // Trim trailing whitespace from each line.
         return text.split(separator: "\n", omittingEmptySubsequences: false)
-            .map { $0.replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression) }
+            .map { $0.replacingOccurrences(of: "[ \t]+$", with: "", options: .regularExpression) }
             .joined(separator: "\n")
     }
 }
