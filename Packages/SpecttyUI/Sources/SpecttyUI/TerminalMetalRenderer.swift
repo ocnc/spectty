@@ -400,30 +400,9 @@ public final class TerminalMetalRenderer: TerminalRenderer {
         let originX = Float(contentRect.minX)
         let originY = Float(contentRect.minY)
 
+        let visibleLines = TerminalText.visibleLines(state: state, scrollback: scrollback, scrollOffset: scrollOffset)
         for row in 0..<state.rows {
-            let line: TerminalLine
-
-            if scrollOffset > 0 {
-                // We're scrolled into scrollback.
-                let scrollbackRow = scrollback.count - scrollOffset + row
-                if scrollbackRow < 0 || scrollbackRow >= scrollback.count {
-                    // Showing screen line.
-                    let screenRow = row - scrollOffset + (scrollOffset > state.rows ? state.rows : 0)
-                    if screenRow >= 0 && screenRow < state.rows {
-                        line = state.lines[screenRow]
-                    } else {
-                        continue
-                    }
-                } else {
-                    if let sbLine = scrollback.line(at: scrollbackRow) {
-                        line = sbLine
-                    } else {
-                        continue
-                    }
-                }
-            } else {
-                line = state.lines[row]
-            }
+            let line = visibleLines[row]
 
             var col = 0
             while col < min(state.columns, line.cells.count) {

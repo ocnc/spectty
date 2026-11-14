@@ -123,6 +123,9 @@ public struct TerminalLine: Sendable {
     public var cells: [TerminalCell]
     public var isDirty: Bool
 
+    /// Number of cells continued onto the next row by automatic wrapping.
+    public var wrappedColumns: Int?
+
     public init(columns: Int) {
         cells = Array(repeating: .blank, count: columns)
         isDirty = true

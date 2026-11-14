@@ -154,6 +154,7 @@ public final class GestureHandler: NSObject, UIGestureRecognizerDelegate {
             metalView.becomeFirstResponder()
             return
         }
+        if metalView.openLink(at: point) { return }
         onLocalTap?()
     }
 
@@ -215,15 +216,15 @@ public final class GestureHandler: NSObject, UIGestureRecognizerDelegate {
     // MARK: - Long Press (Selection)
 
     @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
-        guard let metalView = metalView, let emulator = emulator else { return }
+        guard let metalView = metalView else { return }
 
         let point = gesture.location(in: metalView)
         let coord = metalView.gridCoordinate(for: point)
         let row = coord.row
         var col = coord.col
-        if col > 0, row >= 0, row < emulator.state.rows,
-           col < emulator.state.activeScreen.lines[row].cells.count,
-           emulator.state.activeScreen.lines[row].cells[col].isWideTail {
+        let lines = metalView.visibleLines
+        if col > 0, lines.indices.contains(row),
+           col < lines[row].cells.count, lines[row].cells[col].isWideTail {
             col -= 1
         }
 
@@ -233,12 +234,14 @@ public final class GestureHandler: NSObject, UIGestureRecognizerDelegate {
             selectionFeedback.prepare()
             selectionFeedback.impactOccurred()
             currentSelectionStart = (row: row, col: col)
-            let sel = TerminalSelection(startRow: row, startCol: col, endRow: row, endCol: col)
+            let sel = TerminalText.link(atRow: row, col: col, in: lines)?.selection
+                ?? TerminalSelection(startRow: row, startCol: col, endRow: row, endCol: col)
             currentSelection = sel
             onSelectionChanged?(sel)
 
         case .changed:
             guard let start = currentSelectionStart else { return }
+            guard row != start.row || col != start.col else { return }
             let sel = TerminalSelection(
                 startRow: start.row,
                 startCol: start.col,
@@ -282,19 +285,7 @@ public final class GestureHandler: NSObject, UIGestureRecognizerDelegate {
 
     @objc private func handleTwoFingerTap(_ gesture: UITapGestureRecognizer) {
         guard gesture.state == .ended else { return }
-        guard let pasteboard = UIPasteboard.general.string else { return }
-
-        guard let emulator = emulator else { return }
-
-        var pasteData: Data
-        if emulator.state.modes.contains(.bracketedPaste) {
-            let bracketed = "\u{1B}[200~" + pasteboard + "\u{1B}[201~"
-            pasteData = Data(bracketed.utf8)
-        } else {
-            pasteData = Data(pasteboard.utf8)
-        }
-
-        onMouseEvent?(pasteData)
+        metalView?.paste(nil)
     }
 
     // MARK: - Edge Pan (Session Switching)

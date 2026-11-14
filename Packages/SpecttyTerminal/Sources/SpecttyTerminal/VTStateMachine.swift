@@ -434,16 +434,16 @@ public final class VTStateMachine: @unchecked Sendable {
         // Auto-wrap: if we're past the right margin, wrap to next line.
         if s.cursor.col >= s.columns {
             if terminalState.modes.contains(.autoWrap) {
+                lineFeed(wrappedAt: s.columns)
                 s.cursor.col = 0
-                lineFeed()
             } else {
                 s.cursor.col = s.columns - 1
             }
         }
 
         if width == 2 && s.cursor.col == s.columns - 1 && terminalState.modes.contains(.autoWrap) {
+            lineFeed(wrappedAt: s.cursor.col)
             s.cursor.col = 0
-            lineFeed()
         }
 
         // Write the cell(s).
@@ -503,8 +503,9 @@ public final class VTStateMachine: @unchecked Sendable {
 
     // MARK: - Line Operations
 
-    private func lineFeed() {
+    private func lineFeed(wrappedAt column: Int? = nil) {
         let s = screen
+        s.lines[s.cursor.row].wrappedColumns = column
         if s.cursor.row == s.scrollBottom {
             scrollUp()
         } else if s.cursor.row < s.rows - 1 {
@@ -1092,6 +1093,7 @@ public final class VTStateMachine: @unchecked Sendable {
         guard row >= 0 && row < s.rows else { return }
         switch mode {
         case 0: // Cursor to end of line
+            s.lines[row].wrappedColumns = nil
             let start = normalizedCursorColumn()
             for col in start..<s.columns {
                 eraseCell(row: row, col: col)
