@@ -6,12 +6,15 @@ public struct KeyEvent: Sendable {
     public var modifiers: KeyModifiers
     public var isKeyDown: Bool
     public var characters: String
+    /// Layout character before modifiers, supplied by hardware keyboards.
+    public var unshiftedCharacters: String?
 
-    public init(keyCode: UInt32, modifiers: KeyModifiers, isKeyDown: Bool, characters: String) {
+    public init(keyCode: UInt32, modifiers: KeyModifiers, isKeyDown: Bool, characters: String, unshiftedCharacters: String? = nil) {
         self.keyCode = keyCode
         self.modifiers = modifiers
         self.isKeyDown = isKeyDown
         self.characters = characters
+        self.unshiftedCharacters = unshiftedCharacters
     }
 }
 
@@ -29,9 +32,7 @@ public struct KeyModifiers: OptionSet, Sendable {
     public static let `super` = KeyModifiers(rawValue: 1 << 3)
 }
 
-/// Protocol for terminal emulators. Designed to be swappable —
-/// backed by our Swift state machine + libghostty-vt parsers,
-/// or by a full libghostty C API.
+/// The terminal interface shared by sessions, input, and rendering.
 public protocol TerminalEmulator: AnyObject, Sendable {
     /// The current screen state (for rendering).
     var state: TerminalState { get }
@@ -42,6 +43,12 @@ public protocol TerminalEmulator: AnyObject, Sendable {
     /// Called after the visible terminal content changes and a redraw is needed.
     var onDisplayChange: (@Sendable () -> Void)? { get set }
 
+    var onBell: (@Sendable () -> Void)? { get set }
+    /// Remaining synchronized-output hold, bounded so a broken program cannot freeze rendering.
+    func renderDelay(now: TimeInterval) -> TimeInterval
+    func setFocused(_ focused: Bool)
+    func setDefaultCursorStyle(_ style: CursorStyle)
+
     /// Feed raw bytes from the transport into the terminal.
     func feed(_ data: Data)
 
@@ -50,6 +57,9 @@ public protocol TerminalEmulator: AnyObject, Sendable {
 
     /// Encode a key event into bytes to send to the transport.
     func encodeKey(_ event: KeyEvent) -> Data
+
+    /// Resolve native image placements in physical pixels and advance animations.
+    func graphicsFrame(scrollOffset: Int, cellSize: CGSize, now: TimeInterval) -> TerminalGraphicsFrame
 
     /// Get a specific scrollback line.
     func scrollbackLine(at index: Int) -> TerminalLine?

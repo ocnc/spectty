@@ -51,6 +51,7 @@ struct GlyphCacheKey: Hashable {
     var character: Character
     var fontName: String
     var widthMultiplier: Int
+    var traits: UInt16
 }
 
 /// Glyph cache entry.
@@ -61,13 +62,6 @@ struct GlyphInfo {
     var height: Int
     var bearingX: Float
     var bearingY: Float
-}
-
-/// Resolved glyph source for a character.
-private struct ResolvedGlyph {
-    var fontName: String
-    var scaledFont: CTFont
-    var glyph: CGGlyph
 }
 
 /// Metal-based terminal renderer with glyph atlas.
@@ -88,8 +82,6 @@ public final class TerminalMetalRenderer: TerminalRenderer {
     // Font
     private var font: CTFont             // 1x font for metrics
     private var scaledFont: CTFont       // scaled font for rasterization
-    private var fallbackFontNames: [String] = []
-    private var fallbackScaledFonts: [(name: String, font: CTFont)] = []
     private var _cellSize: CGSize = .zero
     public var cellSize: CGSize { _cellSize }
     private var _scaleFactor: CGFloat = 1.0
@@ -97,6 +89,15 @@ public final class TerminalMetalRenderer: TerminalRenderer {
     // Vertex buffer
     private var vertexBuffer: MTLBuffer?
     private var vertexCount: Int = 0
+    private var backgroundVertexCount = 0
+    private var imagePipeline: MTLRenderPipelineState?
+    private struct ImageTile {
+        let rect: CGRect
+        let texture: MTLTexture
+    }
+    private var imageTextures: [UInt64: [ImageTile]] = [:]
+    private var imageDraws: [(layer: Int, texture: MTLTexture, vertices: [CellVertex])] = []
+    private var imageScissor = MTLScissorRect(x: 0, y: 0, width: 1, height: 1)
 
     // Theme
     private var theme: TerminalTheme = .default
@@ -104,7 +105,6 @@ public final class TerminalMetalRenderer: TerminalRenderer {
     private var defaultBG: (UInt8, UInt8, UInt8) { theme.background }
     private var cursorColor: (UInt8, UInt8, UInt8) { theme.cursor }
     private var isCursorSuppressed = false
-    private var _cursorStyle: CursorStyle = .block
 
     public init(device: MTLDevice, scaleFactor: CGFloat) {
         self.device = device
@@ -112,7 +112,6 @@ public final class TerminalMetalRenderer: TerminalRenderer {
         self.commandQueue = device.makeCommandQueue()
         self.font = CTFontCreateWithName("Menlo" as CFString, 14, nil)
         self.scaledFont = CTFontCreateWithName("Menlo" as CFString, 14 * scaleFactor, nil)
-        rebuildFallbackFonts(for: 14)
         computeCellSize()
         buildAtlas()
         buildPipeline()
@@ -124,7 +123,6 @@ public final class TerminalMetalRenderer: TerminalRenderer {
         _scaleFactor = scale
         let size = CTFontGetSize(font)
         scaledFont = CTFontCreateWithName(CTFontCopyPostScriptName(font), size * scale, nil)
-        rebuildFallbackFonts(for: size)
         glyphCache.removeAll()
         atlasNextX = 0
         atlasNextY = 0
@@ -141,7 +139,6 @@ public final class TerminalMetalRenderer: TerminalRenderer {
         _currentFontSize = termFont.size
         self.font = CTFontCreateWithName(termFont.name as CFString, termFont.size, nil)
         self.scaledFont = CTFontCreateWithName(termFont.name as CFString, termFont.size * _scaleFactor, nil)
-        rebuildFallbackFonts(for: termFont.size)
         computeCellSize()
         glyphCache.removeAll()
         atlasNextX = 0
@@ -152,10 +149,6 @@ public final class TerminalMetalRenderer: TerminalRenderer {
 
     public func setTheme(_ theme: TerminalTheme) {
         self.theme = theme
-    }
-
-    public func setCursorStyle(_ style: CursorStyle) {
-        self._cursorStyle = style
     }
 
     public func setCursorSuppressed(_ suppressed: Bool) {
@@ -199,23 +192,6 @@ public final class TerminalMetalRenderer: TerminalRenderer {
         )
     }
 
-    private func rebuildFallbackFonts(for size: CGFloat) {
-        let candidates = [
-            ".PingFangSC-Regular",
-            "PingFangSC-Regular",
-            ".SFUI-Regular",
-            "Helvetica"
-        ]
-        let primaryName = String(CTFontCopyPostScriptName(font))
-
-        fallbackFontNames = candidates.filter { $0 != primaryName }
-        fallbackScaledFonts = fallbackFontNames.map {
-            ($0, CTFontCreateWithName($0 as CFString, size * _scaleFactor, nil))
-        }
-    }
-
-    // MARK: - Glyph Atlas
-
     private func buildAtlas() {
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: .r8Unorm,
@@ -233,18 +209,19 @@ public final class TerminalMetalRenderer: TerminalRenderer {
         }
     }
 
-    private func glyphInfo(for char: Character, widthMultiplier: Int = 1) -> GlyphInfo {
-        guard let resolved = resolveGlyph(for: char) else {
-            return GlyphInfo(textureX: 0, textureY: 0, width: 0, height: 0, bearingX: 0, bearingY: 0)
-        }
-
-        let cacheKey = GlyphCacheKey(character: char, fontName: resolved.fontName, widthMultiplier: widthMultiplier)
-        if let cached = glyphCache[cacheKey] {
-            return cached
-        }
-
-        var boundingRect = CGRect.zero
-        CTFontGetBoundingRectsForGlyphs(resolved.scaledFont, .horizontal, [resolved.glyph], &boundingRect, 1)
+    private func glyphInfo(for char: Character, widthMultiplier: Int = 1, attributes: CellAttributes = []) -> GlyphInfo {
+        let traits = attributes.intersection([.bold, .italic])
+        let cacheKey = GlyphCacheKey(character: char, fontName: String(CTFontCopyPostScriptName(scaledFont)), widthMultiplier: widthMultiplier, traits: traits.rawValue)
+        if let cached = glyphCache[cacheKey] { return cached }
+        var symbolic: CTFontSymbolicTraits = []
+        if traits.contains(.bold) { symbolic.insert(.traitBold) }
+        if traits.contains(.italic) { symbolic.insert(.traitItalic) }
+        let styledFont = CTFontCreateCopyWithSymbolicTraits(scaledFont, 0, nil, symbolic, [.traitBold, .traitItalic]) ?? scaledFont
+        let text = NSAttributedString(string: String(char), attributes: [
+            NSAttributedString.Key(kCTFontAttributeName as String): styledFont,
+            NSAttributedString.Key(kCTForegroundColorFromContextAttributeName as String): true
+        ])
+        let line = CTLineCreateWithAttributedString(text)
 
         let scale = _scaleFactor
         let bitmapWidth = max(Int(ceil(_cellSize.width * scale * CGFloat(widthMultiplier))), 1)
@@ -281,15 +258,15 @@ public final class TerminalMetalRenderer: TerminalRenderer {
             return info
         }
 
-        let scaledAscent = CTFontGetAscent(resolved.scaledFont)
+        let scaledAscent = CTFontGetAscent(scaledFont)
         context.setFillColor(gray: 0, alpha: 1)
         context.fill(CGRect(x: 0, y: 0, width: bitmapWidth, height: bitmapHeight))
 
         context.setFillColor(gray: 1, alpha: 1)
         context.textMatrix = .identity
 
-        let position = CGPoint(x: -boundingRect.origin.x, y: CGFloat(bitmapHeight) - scaledAscent)
-        CTFontDrawGlyphs(resolved.scaledFont, [resolved.glyph], [position], 1, context)
+        context.textPosition = CGPoint(x: 0, y: CGFloat(bitmapHeight) - scaledAscent)
+        CTLineDraw(line, context)
 
         // Upload to atlas texture.
         let region = MTLRegion(
@@ -308,7 +285,7 @@ public final class TerminalMetalRenderer: TerminalRenderer {
             textureY: atlasNextY,
             width: bitmapWidth,
             height: bitmapHeight,
-            bearingX: Float(boundingRect.origin.x / scale),
+            bearingX: 0,
             bearingY: Float(scaledAscent / scale)
         )
 
@@ -317,35 +294,6 @@ public final class TerminalMetalRenderer: TerminalRenderer {
         atlasRowHeight = max(atlasRowHeight, bitmapHeight)
 
         return info
-    }
-
-    private func resolveGlyph(for char: Character) -> ResolvedGlyph? {
-        let utf16 = Array(String(char).utf16)
-        guard utf16.count == 1 else {
-            return resolveGlyph(from: utf16, with: String(CTFontCopyPostScriptName(scaledFont)), font: scaledFont)
-        }
-
-        if let resolved = resolveGlyph(from: utf16, with: String(CTFontCopyPostScriptName(scaledFont)), font: scaledFont) {
-            return resolved
-        }
-
-        for fallback in fallbackScaledFonts {
-            if let resolved = resolveGlyph(from: utf16, with: fallback.name, font: fallback.font) {
-                return resolved
-            }
-        }
-
-        return nil
-    }
-
-    private func resolveGlyph(from utf16: [UniChar], with fontName: String, font: CTFont) -> ResolvedGlyph? {
-        var chars = utf16
-        var glyphs = [CGGlyph](repeating: 0, count: chars.count)
-        let mapped = CTFontGetGlyphsForCharacters(font, &chars, &glyphs, chars.count)
-        guard mapped, let glyph = glyphs.first, glyph != 0 else {
-            return nil
-        }
-        return ResolvedGlyph(fontName: fontName, scaledFont: font, glyph: glyph)
     }
 
     // MARK: - Metal Pipeline
@@ -375,6 +323,8 @@ public final class TerminalMetalRenderer: TerminalRenderer {
         pipelineDescriptor.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
 
         pipelineState = try? device.makeRenderPipelineState(descriptor: pipelineDescriptor)
+        pipelineDescriptor.fragmentFunction = library.makeFunction(name: "imageFragmentShader")
+        imagePipeline = try? device.makeRenderPipelineState(descriptor: pipelineDescriptor)
     }
 
     // MARK: - Update State
@@ -388,6 +338,7 @@ public final class TerminalMetalRenderer: TerminalRenderer {
     ) {
         // Build vertex data for all visible cells.
         var vertices: [CellVertex] = []
+        var backgrounds: [CellVertex] = []
         vertices.reserveCapacity(state.columns * state.rows * 6) // 6 vertices per cell (2 triangles)
 
         // Use actual viewport size for clip-space mapping so content stays
@@ -429,13 +380,13 @@ public final class TerminalMetalRenderer: TerminalRenderer {
                     Float(fgRGB.0) / 255.0,
                     Float(fgRGB.1) / 255.0,
                     Float(fgRGB.2) / 255.0,
-                    1.0
+                    cell.attributes.contains(.hidden) ? 0 : 1
                 )
                 let bgColor = SIMD4<Float>(
                     Float(bgRGB.0) / 255.0,
                     Float(bgRGB.1) / 255.0,
                     Float(bgRGB.2) / 255.0,
-                    1.0
+                    cell.bg == .default && !isInverse ? 0 : 1
                 )
 
                 // Position in pixel coordinates (top-left origin).
@@ -458,15 +409,15 @@ public final class TerminalMetalRenderer: TerminalRenderer {
 
                 // Draw background across the full occupied width.
                 let zeroUV = SIMD2<Float>(0, 0)
-                vertices.append(CellVertex(position: SIMD2(bgCX0, bgCY0), texCoord: zeroUV, fgColor: fgColor, bgColor: bgColor))
-                vertices.append(CellVertex(position: SIMD2(bgCX1, bgCY0), texCoord: zeroUV, fgColor: fgColor, bgColor: bgColor))
-                vertices.append(CellVertex(position: SIMD2(bgCX0, bgCY1), texCoord: zeroUV, fgColor: fgColor, bgColor: bgColor))
-                vertices.append(CellVertex(position: SIMD2(bgCX1, bgCY0), texCoord: zeroUV, fgColor: fgColor, bgColor: bgColor))
-                vertices.append(CellVertex(position: SIMD2(bgCX1, bgCY1), texCoord: zeroUV, fgColor: fgColor, bgColor: bgColor))
-                vertices.append(CellVertex(position: SIMD2(bgCX0, bgCY1), texCoord: zeroUV, fgColor: fgColor, bgColor: bgColor))
+                backgrounds.append(CellVertex(position: SIMD2(bgCX0, bgCY0), texCoord: zeroUV, fgColor: fgColor, bgColor: bgColor))
+                backgrounds.append(CellVertex(position: SIMD2(bgCX1, bgCY0), texCoord: zeroUV, fgColor: fgColor, bgColor: bgColor))
+                backgrounds.append(CellVertex(position: SIMD2(bgCX0, bgCY1), texCoord: zeroUV, fgColor: fgColor, bgColor: bgColor))
+                backgrounds.append(CellVertex(position: SIMD2(bgCX1, bgCY0), texCoord: zeroUV, fgColor: fgColor, bgColor: bgColor))
+                backgrounds.append(CellVertex(position: SIMD2(bgCX1, bgCY1), texCoord: zeroUV, fgColor: fgColor, bgColor: bgColor))
+                backgrounds.append(CellVertex(position: SIMD2(bgCX0, bgCY1), texCoord: zeroUV, fgColor: fgColor, bgColor: bgColor))
 
                 // Get glyph info for this character.
-                let glyph = glyphInfo(for: cell.character, widthMultiplier: span)
+                let glyph = glyphInfo(for: cell.character, widthMultiplier: span, attributes: cell.attributes)
                 let atlasW = Float(atlasWidth)
                 let atlasH = Float(atlasHeight)
                 let u0 = Float(glyph.textureX) / atlasW
@@ -478,12 +429,23 @@ public final class TerminalMetalRenderer: TerminalRenderer {
                 // atlas entry is rasterized into a 2-cell bitmap and should be
                 // sampled across the full 2-cell quad instead of being squeezed
                 // into a single cell.
-                vertices.append(CellVertex(position: SIMD2(glyphCX0, glyphCY0), texCoord: SIMD2(u0, v0), fgColor: fgColor, bgColor: bgColor))
-                vertices.append(CellVertex(position: SIMD2(glyphCX1, glyphCY0), texCoord: SIMD2(u1, v0), fgColor: fgColor, bgColor: bgColor))
-                vertices.append(CellVertex(position: SIMD2(glyphCX0, glyphCY1), texCoord: SIMD2(u0, v1), fgColor: fgColor, bgColor: bgColor))
-                vertices.append(CellVertex(position: SIMD2(glyphCX1, glyphCY0), texCoord: SIMD2(u1, v0), fgColor: fgColor, bgColor: bgColor))
-                vertices.append(CellVertex(position: SIMD2(glyphCX1, glyphCY1), texCoord: SIMD2(u1, v1), fgColor: fgColor, bgColor: bgColor))
-                vertices.append(CellVertex(position: SIMD2(glyphCX0, glyphCY1), texCoord: SIMD2(u0, v1), fgColor: fgColor, bgColor: bgColor))
+                vertices.append(CellVertex(position: SIMD2(glyphCX0, glyphCY0), texCoord: SIMD2(u0, v0), fgColor: fgColor, bgColor: SIMD4(0, 0, 0, -1)))
+                vertices.append(CellVertex(position: SIMD2(glyphCX1, glyphCY0), texCoord: SIMD2(u1, v0), fgColor: fgColor, bgColor: SIMD4(0, 0, 0, -1)))
+                vertices.append(CellVertex(position: SIMD2(glyphCX0, glyphCY1), texCoord: SIMD2(u0, v1), fgColor: fgColor, bgColor: SIMD4(0, 0, 0, -1)))
+                vertices.append(CellVertex(position: SIMD2(glyphCX1, glyphCY0), texCoord: SIMD2(u1, v0), fgColor: fgColor, bgColor: SIMD4(0, 0, 0, -1)))
+                vertices.append(CellVertex(position: SIMD2(glyphCX1, glyphCY1), texCoord: SIMD2(u1, v1), fgColor: fgColor, bgColor: SIMD4(0, 0, 0, -1)))
+                vertices.append(CellVertex(position: SIMD2(glyphCX0, glyphCY1), texCoord: SIMD2(u0, v1), fgColor: fgColor, bgColor: SIMD4(0, 0, 0, -1)))
+
+                func decoration(at y: Float) {
+                    let thickness = max(1 / Float(_scaleFactor), cellH / 16)
+                    let top = 1 - (y / viewH) * 2
+                    let bottom = 1 - ((y + thickness) / viewH) * 2
+                    for point in [SIMD2(bgCX0, top), SIMD2(bgCX1, top), SIMD2(bgCX0, bottom), SIMD2(bgCX1, top), SIMD2(bgCX1, bottom), SIMD2(bgCX0, bottom)] {
+                        vertices.append(CellVertex(position: point, texCoord: .zero, fgColor: .zero, bgColor: fgColor))
+                    }
+                }
+                if cell.attributes.contains(.underline) { decoration(at: y1 - max(1 / Float(_scaleFactor), cellH / 16)) }
+                if cell.attributes.contains(.strikethrough) { decoration(at: y0 + cellH * 0.5) }
 
                 col += span
             }
@@ -509,7 +471,7 @@ public final class TerminalMetalRenderer: TerminalRenderer {
                 let cursorX1: Float
                 let cursorY1: Float
 
-                switch _cursorStyle {
+                switch state.cursor.style {
                 case .block:
                     cursorX0 = x0
                     cursorY0 = y0
@@ -544,7 +506,7 @@ public final class TerminalMetalRenderer: TerminalRenderer {
                     Float(cursorColor.0) / 255.0,
                     Float(cursorColor.1) / 255.0,
                     Float(cursorColor.2) / 255.0,
-                    _cursorStyle == .block ? 0.85 : 1.0
+                    state.cursor.style == .block ? 0.85 : 1.0
                 )
 
                 let zeroUV = SIMD2<Float>(0, 0)
@@ -558,6 +520,8 @@ public final class TerminalMetalRenderer: TerminalRenderer {
             }
         }
 
+        backgroundVertexCount = backgrounds.count
+        vertices = backgrounds + vertices
         vertexCount = vertices.count
         if vertexCount > 0 {
             vertexBuffer = device.makeBuffer(
@@ -570,34 +534,106 @@ public final class TerminalMetalRenderer: TerminalRenderer {
 
     // MARK: - Render
 
-    func render(to renderPassDescriptor: MTLRenderPassDescriptor, drawable: MTLDrawable) {
-        guard let pipelineState = pipelineState,
-              let commandQueue = commandQueue,
-              let commandBuffer = commandQueue.makeCommandBuffer(),
-              let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor)
-        else { return }
-
-        // Clear with background color.
+    @discardableResult
+    func render(to renderPassDescriptor: MTLRenderPassDescriptor, drawable: MTLDrawable? = nil) -> MTLCommandBuffer? {
         renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(
-            red: Double(defaultBG.0) / 255.0,
-            green: Double(defaultBG.1) / 255.0,
-            blue: Double(defaultBG.2) / 255.0,
-            alpha: 1.0
+            red: Double(defaultBG.0) / 255, green: Double(defaultBG.1) / 255,
+            blue: Double(defaultBG.2) / 255, alpha: 1
         )
-
-        encoder.setRenderPipelineState(pipelineState)
-
-        if let vertexBuffer = vertexBuffer, vertexCount > 0 {
-            encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
-            if let atlas = atlasTexture {
-                encoder.setFragmentTexture(atlas, index: 0)
+        guard let pipelineState, let commandBuffer = commandQueue?.makeCommandBuffer(),
+              let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else { return nil }
+        func images(_ layer: Int) {
+            guard let imagePipeline else { return }
+            encoder.setRenderPipelineState(imagePipeline)
+            encoder.setScissorRect(imageScissor)
+            for draw in imageDraws where draw.layer == layer {
+                encoder.setFragmentTexture(draw.texture, index: 0)
+                encoder.setVertexBytes(draw.vertices, length: draw.vertices.count * MemoryLayout<CellVertex>.stride, index: 0)
+                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: draw.vertices.count)
             }
-            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: vertexCount)
+            if let texture = renderPassDescriptor.colorAttachments[0].texture {
+                encoder.setScissorRect(MTLScissorRect(x: 0, y: 0, width: texture.width, height: texture.height))
+            }
         }
-
+        func cells(start: Int, count: Int) {
+            guard let vertexBuffer, count > 0 else { return }
+            encoder.setRenderPipelineState(pipelineState)
+            encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
+            encoder.setFragmentTexture(atlasTexture, index: 0)
+            encoder.drawPrimitives(type: .triangle, vertexStart: start, vertexCount: count)
+        }
+        images(0)
+        cells(start: 0, count: backgroundVertexCount)
+        images(1)
+        cells(start: backgroundVertexCount, count: vertexCount - backgroundVertexCount)
+        images(2)
         encoder.endEncoding()
-        commandBuffer.present(drawable)
+        if let drawable { commandBuffer.present(drawable) }
         commandBuffer.commit()
+        return commandBuffer
+    }
+
+    func updateImages(_ frame: TerminalGraphicsFrame, viewportSize: CGSize, contentRect: CGRect) {
+        imageDraws.removeAll(keepingCapacity: true)
+        let clipped = contentRect.intersection(CGRect(origin: .zero, size: viewportSize))
+        guard !clipped.isNull, !clipped.isEmpty else { imageTextures.removeAll(); return }
+        imageScissor = MTLScissorRect(x: Int(clipped.minX * _scaleFactor), y: Int(clipped.minY * _scaleFactor),
+                                     width: Int(clipped.width * _scaleFactor), height: Int(clipped.height * _scaleFactor))
+        var used = Set<UInt64>()
+        for placement in frame.placements {
+            let image = placement.image
+            if imageTextures[image.generation] == nil {
+                guard image.width > 0, image.height > 0, image.width <= Int.max / 4 / image.height,
+                      image.rgba.count == image.width * image.height * 4 else { continue }
+                // Tile tall/wide images so valid protocol images cannot exceed Metal texture limits.
+                var tiles: [ImageTile] = []
+                for y in stride(from: 0, to: image.height, by: 4096) {
+                    for x in stride(from: 0, to: image.width, by: 4096) {
+                        let width = min(4096, image.width - x), height = min(4096, image.height - y)
+                        let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm, width: width, height: height, mipmapped: false)
+                        descriptor.usage = .shaderRead
+                        guard let texture = device.makeTexture(descriptor: descriptor) else { continue }
+                        var pixels = Data(count: width * height * 4)
+                        pixels.withUnsafeMutableBytes { output in
+                            image.rgba.withUnsafeBytes { input in
+                                guard let dst = output.baseAddress, let src = input.baseAddress else { return }
+                                for row in 0..<height {
+                                    dst.advanced(by: row * width * 4).copyMemory(from: src.advanced(by: ((y + row) * image.width + x) * 4), byteCount: width * 4)
+                                }
+                            }
+                        }
+                        pixels.withUnsafeBytes { bytes in
+                            if let base = bytes.baseAddress {
+                                texture.replace(region: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0, withBytes: base, bytesPerRow: width * 4)
+                            }
+                        }
+                        tiles.append(ImageTile(rect: CGRect(x: x, y: y, width: width, height: height), texture: texture))
+                    }
+                }
+                imageTextures[image.generation] = tiles
+            }
+            guard let tiles = imageTextures[image.generation], placement.source.width > 0, placement.source.height > 0 else { continue }
+            used.insert(image.generation)
+            for tile in tiles {
+                let source = placement.source.intersection(tile.rect)
+                guard !source.isNull, !source.isEmpty else { continue }
+                let scaleX = placement.destination.width / placement.source.width
+                let scaleY = placement.destination.height / placement.source.height
+                let rect = CGRect(x: placement.destination.minX + (source.minX - placement.source.minX) * scaleX,
+                                  y: placement.destination.minY + (source.minY - placement.source.minY) * scaleY,
+                                  width: source.width * scaleX, height: source.height * scaleY)
+                let x0 = Float((contentRect.minX + rect.minX / _scaleFactor) / viewportSize.width * 2 - 1)
+                let x1 = Float((contentRect.minX + rect.maxX / _scaleFactor) / viewportSize.width * 2 - 1)
+                let y0 = Float(1 - (contentRect.minY + rect.minY / _scaleFactor) / viewportSize.height * 2)
+                let y1 = Float(1 - (contentRect.minY + rect.maxY / _scaleFactor) / viewportSize.height * 2)
+                let u0 = Float((source.minX - tile.rect.minX) / tile.rect.width), u1 = Float((source.maxX - tile.rect.minX) / tile.rect.width)
+                let v0 = Float((source.minY - tile.rect.minY) / tile.rect.height), v1 = Float((source.maxY - tile.rect.minY) / tile.rect.height)
+                let corners: [(Float, Float, Float, Float)] = [(x0,y0,u0,v0),(x1,y0,u1,v0),(x0,y1,u0,v1),(x1,y0,u1,v0),(x1,y1,u1,v1),(x0,y1,u0,v1)]
+                let vertices = corners.map { CellVertex(position: SIMD2($0.0, $0.1), texCoord: SIMD2($0.2, $0.3), fgColor: .zero, bgColor: .zero) }
+                imageDraws.append((placement.layer, tile.texture, vertices))
+            }
+        }
+        imageTextures = imageTextures.filter { used.contains($0.key) }
     }
 
     // MARK: - Metal Shader Source
@@ -639,9 +675,12 @@ public final class TerminalMetalRenderer: TerminalRenderer {
         constexpr sampler s(mag_filter::nearest, min_filter::nearest);
         float glyphAlpha = glyphAtlas.sample(s, in.texCoord).r;
 
-        // Composite: glyph foreground over background.
-        float4 color = mix(in.bgColor, in.fgColor, glyphAlpha);
-        return color;
+        if (in.bgColor.a < 0) return float4(in.fgColor.rgb, glyphAlpha * in.fgColor.a);
+        return in.bgColor;
+    }
+    fragment float4 imageFragmentShader(VertexOut in [[stage_in]], texture2d<float> image [[texture(0)]]) {
+        constexpr sampler s(mag_filter::linear, min_filter::linear, address::clamp_to_edge);
+        return image.sample(s, in.texCoord);
     }
     """
 }

@@ -21,11 +21,6 @@ Packages/*/.build/
 *.p12
 *.mobileprovision
 *.pem
-!Packages/SpecttyTerminal/Sources/CGhosttyVT/include/**
-
-# Vendor binaries (built separately)
-Vendor/libghostty-vt/*.a
-Vendor/libghostty-vt/*.dylib
 
 # Test fixtures
 docker-mosh-test/

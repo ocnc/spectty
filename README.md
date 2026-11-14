@@ -47,10 +47,10 @@
                │ reads state from
 ┌──────────────▼───────────────────────────────────────┐
 │  SpecttyTerminal                                     │
-│  VTStateMachine (CSI/SGR/OSC parser)                 │
+│  libghostty-vt 1.0.1 (native terminal engine)        │
 │  TerminalState (grid, cursor, modes, scrollback)     │
-│  KeyEncoder (xterm key sequences)                    │
-│  CGhosttyVT (C stubs, swappable for libghostty-vt)  │
+│  KeyEncoder (native legacy / Kitty protocols)        │
+│  Kitty image placements → Metal textures             │
 └──────────────┬───────────────────────────────────────┘
                │ TerminalEmulator protocol
 ┌──────────────▼───────────────────────────────────────┐
@@ -76,7 +76,7 @@
 ```
 Keyboard → KeyEncoder → Transport → Remote Server
                                          │
- TerminalMetalView ← TerminalState ← VTStateMachine ← Transport
+ TerminalMetalView ← TerminalState ← libghostty-vt ← Transport
 ```
 
 ## Packages
@@ -125,12 +125,13 @@ Clean-room Swift implementation — no GPL code. Key components:
 
 ## libghostty Integration
 
-The architecture is designed so libghostty components can be swapped in incrementally:
+Spectty uses the official **libghostty-vt 1.0.1** XCFramework, pinned by SHA-256 in `Packages/SpecttyTerminal/Package.swift`. SwiftPM downloads the iOS, simulator, and macOS artifacts; a local Zig build is not required.
 
-- **VT parsing**: Replace `VTStateMachine` with libghostty-vt's terminal state C API — `TerminalEmulator` protocol insulates everything else
-- **Rendering**: Replace `TerminalMetalRenderer` with libghostty's Metal rendering C API — `TerminalRenderer` protocol insulates everything else
+The native library owns parsing, screen state, scrollback, keyboard encoding, and Kitty graphics placement/animation. Its PNG callback uses Apple ImageIO with the native image allocation budget. Swift exposes visible cells and reads history on demand. Spectty's Metal renderer draws images in the native layer order and schedules animation frames only while the view is visible. It also honors application cursor shapes and synchronized-output holds (with a one-second timeout), renders bold/italic text and underline/strikethrough decorations, and shapes each cell with Core Text. OSC 8 HTTP(S) links retain their destinations through scrollback. Native bell callbacks trigger the visual bell, and enabled focus reports follow keyboard focus, session switches, and app backgrounding.
 
-Each swap is independent. No big-bang migration needed.
+Kitty graphics are intended for **SSH sessions**, using direct transmission (for example `kitten icat --transfer-mode=stream image.png`). Local file and shared-memory image loading are disabled: remote programs cannot access files on the phone. Standard `mosh-server` does not carry Kitty graphics; see [Mosh's upstream tracking issue](https://github.com/mobile-shell/mosh/issues/1248).
+
+Native terminal and image tests run with `swift test --package-path Packages/SpecttyTerminal`. GPU layering/clipping and UI regressions run through the `SpecttyUI` package's iOS simulator test scheme.
 
 ## Build
 

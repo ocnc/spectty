@@ -102,6 +102,9 @@ public struct TerminalCell: Equatable, Sendable {
     /// Text attributes.
     public var attributes: CellAttributes
 
+    /// Explicit OSC 8 destination, independent of the displayed label.
+    public var hyperlink: String?
+
     /// A blank cell with default colors.
     public static let blank = TerminalCell(
         character: " ",
@@ -110,11 +113,12 @@ public struct TerminalCell: Equatable, Sendable {
         attributes: []
     )
 
-    public init(character: Character, fg: TerminalColor, bg: TerminalColor, attributes: CellAttributes) {
+    public init(character: Character, fg: TerminalColor, bg: TerminalColor, attributes: CellAttributes, hyperlink: String? = nil) {
         self.character = character
         self.fg = fg
         self.bg = bg
         self.attributes = attributes
+        self.hyperlink = hyperlink
     }
 }
 

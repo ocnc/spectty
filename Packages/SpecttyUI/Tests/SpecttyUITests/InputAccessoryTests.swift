@@ -73,6 +73,26 @@ final class InputAccessoryTests: XCTestCase {
         XCTAssertEqual(sent, Data([0x1B, 0x7F]))
     }
 
+    @MainActor func testSoftwareControlLettersReachNativeEncoder() throws {
+        guard MTLCreateSystemDefaultDevice() != nil else { throw XCTSkip("Metal unavailable") }
+        let emulator = GhosttyTerminalEmulator()
+        let view = TerminalMetalView(frame: CGRect(x: 0, y: 0, width: 390, height: 700), emulator: emulator)
+        let control = try XCTUnwrap(descendants(of: view).compactMap { $0 as? UIButton }.first { $0.accessibilityLabel == "Control" })
+        var sent = Data()
+        view.onKeyInput = { sent.append(emulator.encodeKey($0)) }
+        for (letter, expected) in [("c", Data([3])), ("d", Data([4]))] {
+            sent = Data()
+            control.sendActions(for: .touchUpInside)
+            view.insertText(letter)
+            XCTAssertEqual(sent, expected)
+        }
+        emulator.feed(Data("\u{1b}[>3u".utf8))
+        sent = Data()
+        control.sendActions(for: .touchUpInside)
+        view.insertText("c")
+        XCTAssertEqual(sent, Data("\u{1b}[99;5u".utf8))
+    }
+
     func testPasteEncoding() {
         XCTAssertEqual(TerminalPaste.data(for: "hello", bracketed: false), Data("hello".utf8))
         XCTAssertEqual(TerminalPaste.data(for: "hello", bracketed: true), Data("\u{1B}[200~hello\u{1B}[201~".utf8))

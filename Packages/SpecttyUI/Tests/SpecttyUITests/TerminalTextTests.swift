@@ -26,11 +26,11 @@ final class TerminalTextTests: XCTestCase {
         for row in 0...2 {
             let link = try XCTUnwrap(TerminalText.link(atRow: row, col: 8, in: lines))
             XCTAssertEqual(link.url.absoluteString, url)
-            XCTAssertEqual(link.selection.startCol, 4)
-            XCTAssertEqual(link.selection.endRow, 2)
+            XCTAssertEqual(link.selection.startCol, 5)
+            XCTAssertEqual(link.selection.endRow, 3)
         }
         XCTAssertNil(TerminalText.link(atRow: 0, col: 0, in: lines))
-        XCTAssertNil(TerminalText.link(atRow: 3, col: 0, in: lines))
+        XCTAssertNil(TerminalText.link(atRow: 3, col: 2, in: lines))
     }
 
     func testLinksDoNotJoinAcrossHardNewlinesOrOpenOtherSchemes() {
@@ -107,4 +107,19 @@ final class TerminalTextTests: XCTestCase {
         view.paste(nil)
         XCTAssertEqual(sent.count, 2)
     }
+    func testExplicitHyperlinksKeepLabelsAcrossWrapAndScrollback() throws {
+        let emulator = GhosttyTerminalEmulator(columns: 5, rows: 2)
+        emulator.feed(Data("\u{1b}]8;;https://example.com/build/42\u{1b}\\View build\u{1b}]8;;\u{1b}\\".utf8))
+        let lines = emulator.state.activeScreen.lines
+        let link = try XCTUnwrap(TerminalText.link(atRow: 1, col: 2, in: lines))
+        XCTAssertEqual(link.url.absoluteString, "https://example.com/build/42")
+        XCTAssertEqual(link.selection.startRow, 0)
+        XCTAssertEqual(link.selection.endRow, 1)
+        emulator.feed(Data("\r\nnext\r\n".utf8))
+        let history = TerminalText.visibleLines(state: emulator.state.activeScreen, scrollback: emulator.state.scrollback, scrollOffset: emulator.scrollbackCount)
+        XCTAssertEqual(TerminalText.link(atRow: 0, col: 0, in: history)?.url, link.url)
+        emulator.feed(Data("\u{1b}[2J\u{1b}[H\u{1b}]8;;file:///etc/passwd\u{1b}\\label\u{1b}]8;;\u{1b}\\".utf8))
+        XCTAssertNil(TerminalText.link(atRow: 0, col: 0, in: emulator.state.activeScreen.lines))
+    }
+
 }

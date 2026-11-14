@@ -1,61 +1,26 @@
 import Foundation
 
-/// Ring buffer for terminal scrollback history.
+/// A read-only view of native scrollback; lines are decoded only when requested.
 public struct TerminalBuffer: Sendable {
-    private var storage: [TerminalLine]
-    private var head: Int = 0
-    private var _count: Int = 0
+    public let count: Int
     public let capacity: Int
-
-    public var count: Int { _count }
+    private let readLine: (@Sendable (Int) -> TerminalLine?)?
 
     public init(capacity: Int = 10_000) {
+        count = 0
         self.capacity = capacity
-        self.storage = []
-        self.storage.reserveCapacity(min(capacity, 1024))
+        readLine = nil
     }
 
-    /// Push a line into the scrollback buffer.
-    public mutating func push(_ line: TerminalLine) {
-        if storage.count < capacity {
-            storage.append(line)
-            _count = storage.count
-        } else {
-            storage[head] = line
-            head = (head + 1) % capacity
-            _count = capacity
-        }
+    init(count: Int, capacity: Int, line: @escaping @Sendable (Int) -> TerminalLine?) {
+        self.count = count
+        self.capacity = capacity
+        readLine = line
     }
 
-    /// Access a line by index (0 = oldest visible, count-1 = most recent).
+    /// Index zero is the oldest retained line.
     public func line(at index: Int) -> TerminalLine? {
-        guard index >= 0, index < _count else { return nil }
-        let storageIndex: Int
-        if storage.count < capacity {
-            storageIndex = index
-        } else {
-            storageIndex = (head + index) % capacity
-        }
-        return storage[storageIndex]
-    }
-
-    /// Remove and return the most recent line from the buffer.
-    public mutating func popLast() -> TerminalLine? {
-        guard _count > 0 else { return nil }
-        if storage.count < capacity {
-            _count -= 1
-            return storage.removeLast()
-        } else {
-            let newestIndex = (head + _count - 1) % capacity
-            _count -= 1
-            return storage[newestIndex]
-        }
-    }
-
-    /// Clear the scrollback buffer.
-    public mutating func clear() {
-        storage.removeAll(keepingCapacity: true)
-        head = 0
-        _count = 0
+        guard index >= 0, index < count else { return nil }
+        return readLine?(index)
     }
 }

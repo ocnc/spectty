@@ -67,7 +67,7 @@ final class TerminalSession: Identifiable {
                 guard let self else { break }
                 self.emulator.feed(data)
                 // Update title from terminal state.
-                let newTitle = self.emulator.state.activeScreen.title
+                let newTitle = self.emulator.title
                 if !newTitle.isEmpty && newTitle != self.title {
                     self.title = newTitle
                 }
@@ -146,7 +146,7 @@ final class TerminalSession: Identifiable {
             for await data in newDataStream {
                 guard let self else { break }
                 self.emulator.feed(data)
-                let newTitle = self.emulator.state.activeScreen.title
+                let newTitle = self.emulator.title
                 if !newTitle.isEmpty && newTitle != self.title {
                     self.title = newTitle
                 }

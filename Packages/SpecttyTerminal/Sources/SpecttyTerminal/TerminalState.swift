@@ -14,14 +14,7 @@ public struct CursorState: Equatable, Sendable {
     public var visible: Bool = true
     public var style: CursorStyle = .block
 
-    /// Saved cursor state for DECSC/DECRC.
-    public struct SavedState: Sendable {
-        public var row: Int
-        public var col: Int
-        public var attributes: CellAttributes
-        public var fg: TerminalColor
-        public var bg: TerminalColor
-    }
+
 }
 
 /// Terminal mode flags.
@@ -56,6 +49,8 @@ public struct TerminalModes: OptionSet, Sendable {
     public static let mouseAny = TerminalModes(rawValue: 1 << 10)
     /// Mouse tracking: SGR extended mode.
     public static let mouseSGR = TerminalModes(rawValue: 1 << 11)
+    /// Kitty keyboard protocol is negotiated.
+    public static let kittyKeyboard = TerminalModes(rawValue: 1 << 13)
     /// Cursor visible (DECTCEM).
     public static let cursorVisible = TerminalModes(rawValue: 1 << 12)
 }
@@ -66,20 +61,6 @@ public final class TerminalScreenState: @unchecked Sendable {
     public var rows: Int
     public var lines: [TerminalLine]
     public var cursor: CursorState
-    public var savedCursor: CursorState.SavedState?
-
-    /// Current SGR attributes applied to new characters.
-    public var currentAttributes: CellAttributes = []
-    public var currentFG: TerminalColor = .default
-    public var currentBG: TerminalColor = .default
-
-    /// Scroll region (top and bottom, 0-indexed, inclusive).
-    public var scrollTop: Int = 0
-    public var scrollBottom: Int
-
-    /// Tab stops.
-    public var tabStops: Set<Int>
-
     /// Window title set via OSC.
     public var title: String = ""
 
@@ -88,9 +69,6 @@ public final class TerminalScreenState: @unchecked Sendable {
         self.rows = rows
         self.lines = (0..<rows).map { _ in TerminalLine(columns: columns) }
         self.cursor = CursorState()
-        self.scrollBottom = rows - 1
-        // Default tab stops every 8 columns.
-        self.tabStops = Set(stride(from: 8, to: columns, by: 8))
     }
 
     /// Extract all visible text as a string, trimming trailing whitespace per line.
@@ -106,20 +84,6 @@ public final class TerminalScreenState: @unchecked Sendable {
         return result.joined(separator: "\n")
     }
 
-    /// Reset the screen to blank.
-    public func reset() {
-        for i in 0..<rows {
-            lines[i] = TerminalLine(columns: columns)
-        }
-        cursor = CursorState()
-        savedCursor = nil
-        currentAttributes = []
-        currentFG = .default
-        currentBG = .default
-        scrollTop = 0
-        scrollBottom = rows - 1
-        tabStops = Set(stride(from: 8, to: columns, by: 8))
-    }
 }
 
 /// The full terminal state including both screens and scrollback.
@@ -134,9 +98,6 @@ public final class TerminalState: @unchecked Sendable {
     /// Which screen is currently active.
     public var activeScreen: TerminalScreenState
 
-    /// The 256-color palette (mutable for OSC color changes).
-    public var colorPalette: [(UInt8, UInt8, UInt8)]
-
     public var columns: Int { activeScreen.columns }
     public var rows: Int { activeScreen.rows }
 
@@ -147,86 +108,6 @@ public final class TerminalState: @unchecked Sendable {
         self.modes = [.autoWrap, .cursorVisible]
         self.activeScreen = primaryScreen
 
-        // Initialize color palette from the default ANSI colors.
-        var palette = [(UInt8, UInt8, UInt8)]()
-        palette.reserveCapacity(256)
-        for color in TerminalColor.palette {
-            switch color {
-            case .rgb(let r, let g, let b):
-                palette.append((r, g, b))
-            default:
-                palette.append((0, 0, 0))
-            }
-        }
-        self.colorPalette = palette
-    }
-
-    /// Resize the terminal. Reflows the primary screen.
-    public func resize(columns: Int, rows: Int) {
-        resizeScreen(primaryScreen, columns: columns, rows: rows)
-        resizeScreen(alternateScreen, columns: columns, rows: rows)
-    }
-
-    private func resizeScreen(_ screen: TerminalScreenState, columns: Int, rows: Int) {
-        let oldRows = screen.rows
-        screen.columns = columns
-        screen.rows = rows
-
-        // Resize existing lines.
-        for i in 0..<screen.lines.count {
-            screen.lines[i].resize(columns: columns)
-            normalizeWideCharacters(in: &screen.lines[i])
-        }
-
-        // Add or remove lines as needed.
-        if rows > oldRows {
-            let needed = rows - oldRows
-            if screen === primaryScreen {
-                // Pull lines back from scrollback to restore content.
-                var recovered = [TerminalLine]()
-                for _ in 0..<needed {
-                    if var line = scrollback.popLast() {
-                        line.resize(columns: columns)
-                        normalizeWideCharacters(in: &line)
-                        recovered.insert(line, at: 0)
-                    } else {
-                        break
-                    }
-                }
-                screen.lines.insert(contentsOf: recovered, at: 0)
-                screen.cursor.row += recovered.count
-                // Fill any remaining with blank lines.
-                let remaining = needed - recovered.count
-                for _ in 0..<remaining {
-                    screen.lines.append(TerminalLine(columns: columns))
-                }
-            } else {
-                for _ in oldRows..<rows {
-                    screen.lines.append(TerminalLine(columns: columns))
-                }
-            }
-        } else if rows < oldRows {
-            // Remove lines from the top, pushing them to scrollback if primary.
-            let excess = oldRows - rows
-            if screen === primaryScreen {
-                for i in 0..<excess {
-                    scrollback.push(screen.lines[i])
-                }
-            }
-            screen.lines.removeFirst(excess)
-        }
-
-        // Clamp cursor.
-        screen.cursor.row = min(screen.cursor.row, rows - 1)
-        screen.cursor.col = min(screen.cursor.col, columns - 1)
-        normalizeCursorColumn(in: screen)
-
-        // Adjust scroll region.
-        screen.scrollTop = 0
-        screen.scrollBottom = rows - 1
-
-        // Recalculate tab stops.
-        screen.tabStops = Set(stride(from: 8, to: columns, by: 8))
     }
 }
 
@@ -271,18 +152,5 @@ public extension TerminalLine {
         }
         let lineText = text.replacingOccurrences(of: "\0", with: " ")
         return lineText.replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression)
-    }
-}
-
-private func normalizeWideCharacters(in line: inout TerminalLine) {
-    line.normalizeWideCharacters()
-}
-
-private func normalizeCursorColumn(in screen: TerminalScreenState) {
-    guard screen.cursor.row >= 0 && screen.cursor.row < screen.lines.count else { return }
-    let line = screen.lines[screen.cursor.row]
-    guard screen.cursor.col > 0, screen.cursor.col < line.cells.count else { return }
-    if line.cells[screen.cursor.col].isWideTail {
-        screen.cursor.col -= 1
     }
 }

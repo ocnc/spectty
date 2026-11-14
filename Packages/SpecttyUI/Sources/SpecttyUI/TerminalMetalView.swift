@@ -117,8 +117,10 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
         }
         return bar
     }()
+    private var animationWorkItem: DispatchWorkItem?
     private var pendingDisplayWorkItem: DispatchWorkItem?
     private var isInBackground = false
+    private var preferredCursorStyle: CursorStyle = .block
     private var lastDisplayTime: CFTimeInterval = 0
 
     /// Callback for when the view is resized and a new grid size is computed.
@@ -262,13 +264,17 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
     }
 
     @objc private func appDidEnterBackground() {
+        terminalEmulator?.setFocused(false)
         isInBackground = true
+        animationWorkItem?.cancel()
+        animationWorkItem = nil
         pendingDisplayWorkItem?.cancel()
         pendingDisplayWorkItem = nil
     }
 
     @objc private func appWillEnterForeground() {
         isInBackground = false
+        updateTerminalFocus()
         requestDisplay()
     }
 
@@ -287,10 +293,16 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
     /// Preserves first-responder status (keyboard stays up).
     public func setEmulator(_ emulator: any TerminalEmulator) {
         cancelIMEComposition()
+        animationWorkItem?.cancel()
+        animationWorkItem = nil
+        terminalEmulator?.setFocused(false)
+        terminalEmulator?.onBell = nil
         terminalEmulator?.onDisplayChange = nil
         pendingDisplayWorkItem?.cancel()
         pendingDisplayWorkItem = nil
         self.terminalEmulator = emulator
+        setCursorStyle(preferredCursorStyle)
+        updateTerminalFocus()
         installDisplayChangeHandler(for: emulator)
         self.scrollOffset = 0
         clearSelection()
@@ -303,6 +315,12 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
     }
 
     private func installDisplayChangeHandler(for emulator: (any TerminalEmulator)?) {
+        emulator?.onBell = { [weak self, weak emulator] in
+            Task { @MainActor [weak self, weak emulator] in
+                guard let self, let emulator, self.terminalEmulator === emulator else { return }
+                self.flashBell()
+            }
+        }
         emulator?.onDisplayChange = { [weak self, weak emulator] in
             Task { @MainActor [weak self, weak emulator] in
                 guard let self, let emulator, self.terminalEmulator === emulator else { return }
@@ -391,6 +409,13 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
 
 
     public override var isFirstResponder: Bool { imeTextField.isFirstResponder }
+
+    private func updateTerminalFocus() {
+        terminalEmulator?.setFocused(window != nil && !isInBackground && inputEnabled && imeTextField.isFirstResponder)
+    }
+
+    public func textFieldDidBeginEditing(_ textField: UITextField) { updateTerminalFocus() }
+    public func textFieldDidEndEditing(_ textField: UITextField) { updateTerminalFocus() }
 
     @discardableResult public override func becomeFirstResponder() -> Bool {
         wantsFirstResponder = true
@@ -490,17 +515,7 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
         }
 
         for char in text {
-            let characters: String
-            if char == "\n" {
-                characters = "\r"
-            } else if modifiers.contains(.control), let ascii = char.asciiValue,
-                      (0x61...0x7A).contains(ascii) || (0x41...0x5A).contains(ascii) {
-                // Ctrl+letter → control character (e.g., Ctrl+C = 0x03)
-                let upper = ascii & 0x1F
-                characters = String(UnicodeScalar(upper))
-            } else {
-                characters = String(char)
-            }
+            let characters = char == "\n" ? "\r" : String(char)
 
             let event = KeyEvent(
                 keyCode: char == "\n" ? 0x28 : 0,
@@ -692,7 +707,8 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
     }
 
     public func setCursorStyle(_ style: CursorStyle) {
-        renderer?.setCursorStyle(style)
+        preferredCursorStyle = style
+        terminalEmulator?.setDefaultCursorStyle(style == .bar ? .bar : style == .underline ? .underline : .block)
         requestDisplay()
     }
 
@@ -800,6 +816,8 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
 
     public override func didMoveToWindow() {
         super.didMoveToWindow()
+        updateTerminalFocus()
+        if window == nil { animationWorkItem?.cancel(); animationWorkItem = nil }
         setNeedsLayout()
         requestDisplay()
     }
@@ -836,15 +854,18 @@ public final class TerminalMetalView: MTKView, UIKeyInput {
             }
             let isSpecial = (0x28...0x2B).contains(key.keyCode.rawValue) || (0x3A...0x52).contains(key.keyCode.rawValue)
             let modifiers = key.modifierFlags.intersection([.shift, .alternate, .control, .command])
-            // Let UIKit handle app shortcuts, input-method switching, and printable text.
+            // Kitty needs hardware modifiers and releases that text insertion discards.
+            let kittyKeyboard = terminalEmulator?.state.modes.contains(.kittyKeyboard) == true
+            // Let UIKit handle app shortcuts, input-method switching, and ordinary text input.
             if modifiers.contains(.command) ||
                ((modifiers == .control || modifiers == [.control, .shift]) && key.charactersIgnoringModifiers == " ") ||
-               (!isSpecial && modifiers.subtracting(.shift).isEmpty && !key.characters.isEmpty && key.characters.rangeOfCharacter(from: .controlCharacters) == nil) {
+               (!kittyKeyboard && !isSpecial && modifiers.subtracting(.shift).isEmpty && !key.characters.isEmpty && key.characters.rangeOfCharacter(from: .controlCharacters) == nil) {
                 remaining.insert(press)
                 continue
             }
             onKeyInput?(KeyEvent(keyCode: UInt32(key.keyCode.rawValue), modifiers: modifiersFromUIKey(key), isKeyDown: isKeyDown,
-                characters: HardwareKeyInterpreter.terminalCharacters(rawCharacters: key.characters, charactersIgnoringModifiers: key.charactersIgnoringModifiers, modifiers: key.modifierFlags)))
+                characters: HardwareKeyInterpreter.terminalCharacters(rawCharacters: key.characters, charactersIgnoringModifiers: key.charactersIgnoringModifiers, modifiers: key.modifierFlags),
+                unshiftedCharacters: key.charactersIgnoringModifiers))
         }
         return remaining
     }
@@ -874,7 +895,26 @@ extension TerminalMetalView: MTKViewDelegate {
               let drawable = view.currentDrawable
         else { return }
 
+        let hold = emulator.renderDelay(now: ProcessInfo.processInfo.systemUptime)
+        if hold > 0 {
+            animationWorkItem?.cancel()
+            let work = DispatchWorkItem { [weak self] in self?.requestDisplay() }
+            animationWorkItem = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + hold, execute: work)
+            return
+        }
         updatePreeditOverlay()
+        animationWorkItem?.cancel()
+        animationWorkItem = nil
+        let graphics = emulator.graphicsFrame(scrollOffset: scrollOffset,
+            cellSize: CGSize(width: cellSize.width * contentScaleFactor, height: cellSize.height * contentScaleFactor),
+            now: ProcessInfo.processInfo.systemUptime)
+        renderer.updateImages(graphics, viewportSize: bounds.size, contentRect: terminalContentRect)
+        if let delay = graphics.nextFrameDelay, window != nil {
+            let work = DispatchWorkItem { [weak self] in self?.requestDisplay() }
+            animationWorkItem = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+        }
         let state = emulator.state.activeScreen
         renderer.update(
             state: state,

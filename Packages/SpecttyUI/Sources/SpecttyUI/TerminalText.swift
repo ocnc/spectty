@@ -36,6 +36,15 @@ enum TerminalText {
             }
         }
         guard let tapped = cells.first(where: { $0.row == row && col >= $0.col && col < $0.col + $0.width }) else { return nil }
+        if let uri = lines[tapped.row].cells[tapped.col].hyperlink {
+            guard let url = URL(string: uri), ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
+                  let index = cells.firstIndex(where: { $0.row == tapped.row && $0.col == tapped.col }) else { return nil }
+            var start = index
+            var end = index
+            while start > 0 && lines[cells[start - 1].row].cells[cells[start - 1].col].hyperlink == uri { start -= 1 }
+            while end + 1 < cells.count && lines[cells[end + 1].row].cells[cells[end + 1].col].hyperlink == uri { end += 1 }
+            return (url, TerminalSelection(startRow: cells[start].row, startCol: cells[start].col, endRow: cells[end].row, endCol: cells[end].col))
+        }
         let matches = linkDetector?.matches(in: text, range: NSRange(location: 0, length: text.utf16.count)) ?? []
         guard let match = matches.first(where: { NSIntersectionRange($0.range, tapped.range).length > 0 }),
               let url = match.url, ["http", "https"].contains(url.scheme?.lowercased() ?? ""),

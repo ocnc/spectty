@@ -109,6 +109,24 @@ final class IMEInputTests: XCTestCase {
         XCTAssertTrue(view.preeditLabel.isHidden)
     }
 
+    @MainActor func testCommittedTextSurvivesKittyKeyboardModes() async throws {
+        let view = try makeView()
+        var sent = Data()
+        view.onKeyInput = { sent.append(self.emulator.encodeKey($0)) }
+        for flags in [1, 3, 8, 15, 31] {
+            emulator.feed(Data("\u{1b}[=\(flags)u".utf8))
+            for text in ["hello world", "中文", "e\u{301}", "👩‍💻"] {
+                sent = Data()
+                view.imeTextField.setMarkedText("pending", selectedRange: NSRange(location: 7, length: 0))
+                XCTAssertTrue(sent.isEmpty)
+                view.imeTextField.setMarkedText(text, selectedRange: NSRange(location: text.utf16.count, length: 0))
+                view.imeTextField.unmarkText()
+                view.handleIMETextChanged()
+                XCTAssertEqual(sent, Data(text.utf8), "Kitty flags \(flags), text \(text)")
+            }
+        }
+    }
+
     @MainActor private func makeView() throws -> TerminalMetalView {
         guard MTLCreateSystemDefaultDevice() != nil else { throw XCTSkip("Metal unavailable") }
         return TerminalMetalView(frame: CGRect(x: 0, y: 0, width: 400, height: 300), emulator: emulator)

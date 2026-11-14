@@ -30,8 +30,9 @@ struct AcknowledgementsView: View {
                 repository: URL(string: "https://huggingface.co/FluidInference/parakeet-ultra-coreml")
             ),
             Acknow(
-                title: "Ghostty",
-                text: """
+                title: "libghostty-vt and dependencies",
+                text: (Bundle.main.url(forResource: "Libghostty-LICENSES", withExtension: "txt")
+                    .flatMap { try? String(contentsOf: $0, encoding: .utf8) }) ?? """
                 MIT License
 
                 Copyright (c) 2024 Mitchell Hashimoto, Ghostty contributors

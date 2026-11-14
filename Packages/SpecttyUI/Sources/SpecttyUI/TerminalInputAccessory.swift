@@ -219,7 +219,7 @@ public final class TerminalInputAccessory: UIInputView {
             invalidateIntrinsicContentSize()
             superview?.setNeedsLayout()
         case .newline:
-            sendKey(keyCode: 0, characters: "\n", modifiers: [.control])
+            sendKey(keyCode: 0x0D, characters: "j", modifiers: [.control])
             deactivateModifiers()
         case .toggleAlt:
             altActive.toggle()

@@ -1,217 +1,93 @@
 import Foundation
+import GhosttyVt
 
-/// Encodes key events into escape sequences for the terminal.
-///
-/// This is a Swift implementation that handles standard xterm key encoding.
-/// Can be swapped for libghostty-vt's `ghostty_key_encode` via the same interface.
+/// Converts UIKit USB HID events to the native terminal's input protocol.
 public struct KeyEncoder: Sendable {
     public init() {}
 
-    /// Encode a key event given the current terminal modes.
     public func encode(_ event: KeyEvent, modes: TerminalModes) -> Data {
-        guard event.isKeyDown else { return Data() }
-
-        let applicationCursor = modes.contains(.applicationCursor)
-
-        // Shift+Tab → backtab (CSI Z).
-        if event.keyCode == Self.keyTab && event.modifiers.contains(.shift) {
-            return Data("\u{1B}[Z".utf8)
-        }
-
-        // Handle special keys (arrows, function keys, etc.).
-        if let special = encodeSpecialKey(event.keyCode, applicationCursor: applicationCursor) {
-            if let literal = encodeLiteralSpecialKey(special, modifiers: event.modifiers) {
-                return literal
-            }
-            if event.modifiers.isEmpty {
-                return Data(special.utf8)
-            }
-            // Modified special key: CSI 1;mod final
-            return encodeModifiedSpecial(special, modifiers: event.modifiers)
-        }
-
-        if !event.characters.isEmpty {
-            let data: Data
-
-            // Alt acts as Meta for printable keys: prefix ESC and send the
-            // unmodified printable bytes after control handling if present.
-            if event.modifiers.contains(.control) {
-                data = encodeControl(event.characters)
-            } else {
-                data = Data(event.characters.utf8)
-            }
-
-            if event.modifiers.contains(.alt) {
-                return Data([0x1B]) + data
-            }
-
-            return data
-        }
-
-        return Data()
+        encode(event, modes: modes, terminal: nil)
     }
 
-    // MARK: - Special Keys
-
-    // USB HID keycodes for common keys.
-    private static let keyUp: UInt32 = 0x52
-    private static let keyDown: UInt32 = 0x51
-    private static let keyRight: UInt32 = 0x4F
-    private static let keyLeft: UInt32 = 0x50
-    private static let keyHome: UInt32 = 0x4A
-    private static let keyEnd: UInt32 = 0x4D
-    private static let keyPageUp: UInt32 = 0x4B
-    private static let keyPageDown: UInt32 = 0x4E
-    private static let keyInsert: UInt32 = 0x49
-    private static let keyDelete: UInt32 = 0x4C
-    private static let keyF1: UInt32 = 0x3A
-    private static let keyF2: UInt32 = 0x3B
-    private static let keyF3: UInt32 = 0x3C
-    private static let keyF4: UInt32 = 0x3D
-    private static let keyF5: UInt32 = 0x3E
-    private static let keyF6: UInt32 = 0x3F
-    private static let keyF7: UInt32 = 0x40
-    private static let keyF8: UInt32 = 0x41
-    private static let keyF9: UInt32 = 0x42
-    private static let keyF10: UInt32 = 0x43
-    private static let keyF11: UInt32 = 0x44
-    private static let keyF12: UInt32 = 0x45
-    private static let keyTab: UInt32 = 0x2B
-    private static let keyReturn: UInt32 = 0x28
-    private static let keyEscape: UInt32 = 0x29
-    private static let keyBackspace: UInt32 = 0x2A
-
-    private func encodeSpecialKey(_ keyCode: UInt32, applicationCursor: Bool) -> String? {
-        switch keyCode {
-        case Self.keyUp:
-            return applicationCursor ? "\u{1B}OA" : "\u{1B}[A"
-        case Self.keyDown:
-            return applicationCursor ? "\u{1B}OB" : "\u{1B}[B"
-        case Self.keyRight:
-            return applicationCursor ? "\u{1B}OC" : "\u{1B}[C"
-        case Self.keyLeft:
-            return applicationCursor ? "\u{1B}OD" : "\u{1B}[D"
-        case Self.keyHome:
-            return applicationCursor ? "\u{1B}OH" : "\u{1B}[H"
-        case Self.keyEnd:
-            return applicationCursor ? "\u{1B}OF" : "\u{1B}[F"
-        case Self.keyPageUp:
-            return "\u{1B}[5~"
-        case Self.keyPageDown:
-            return "\u{1B}[6~"
-        case Self.keyInsert:
-            return "\u{1B}[2~"
-        case Self.keyDelete:
-            return "\u{1B}[3~"
-        case Self.keyF1:
-            return "\u{1B}OP"
-        case Self.keyF2:
-            return "\u{1B}OQ"
-        case Self.keyF3:
-            return "\u{1B}OR"
-        case Self.keyF4:
-            return "\u{1B}OS"
-        case Self.keyF5:
-            return "\u{1B}[15~"
-        case Self.keyF6:
-            return "\u{1B}[17~"
-        case Self.keyF7:
-            return "\u{1B}[18~"
-        case Self.keyF8:
-            return "\u{1B}[19~"
-        case Self.keyF9:
-            return "\u{1B}[20~"
-        case Self.keyF10:
-            return "\u{1B}[21~"
-        case Self.keyF11:
-            return "\u{1B}[23~"
-        case Self.keyF12:
-            return "\u{1B}[24~"
-        case Self.keyTab:
-            return "\t"
-        case Self.keyReturn:
-            return "\r"
-        case Self.keyEscape:
-            return "\u{1B}"
-        case Self.keyBackspace:
-            return "\u{7F}"
-        default:
-            return nil
+    func encode(_ event: KeyEvent, modes: TerminalModes, terminal: GhosttyTerminal?) -> Data {
+        var encoder: GhosttyKeyEncoder?
+        guard ghostty_key_encoder_new(nil, &encoder) == GHOSTTY_SUCCESS else { return Data() }
+        defer { ghostty_key_encoder_free(encoder) }
+        if let terminal {
+            ghostty_key_encoder_set_from_terminal(encoder, terminal)
+        } else {
+            var cursor = modes.contains(.applicationCursor)
+            var keypad = modes.contains(.applicationKeypad)
+            ghostty_key_encoder_set(encoder, GHOSTTY_KEY_ENCODER_OPT_CURSOR_KEY_APPLICATION, &cursor)
+            ghostty_key_encoder_set(encoder, GHOSTTY_KEY_ENCODER_OPT_KEYPAD_KEY_APPLICATION, &keypad)
+        }
+        var altPrefix = true
+        ghostty_key_encoder_set(encoder, GHOSTTY_KEY_ENCODER_OPT_ALT_ESC_PREFIX, &altPrefix)
+        var optionAsAlt = GHOSTTY_OPTION_AS_ALT_TRUE
+        ghostty_key_encoder_set(encoder, GHOSTTY_KEY_ENCODER_OPT_MACOS_OPTION_AS_ALT, &optionAsAlt)
+        var native: GhosttyKeyEvent?
+        guard ghostty_key_event_new(nil, &native) == GHOSTTY_SUCCESS else { return Data() }
+        defer { ghostty_key_event_free(native) }
+        ghostty_key_event_set_action(native, event.isKeyDown ? GHOSTTY_KEY_ACTION_PRESS : GHOSTTY_KEY_ACTION_RELEASE)
+        ghostty_key_event_set_key(native, Self.key(event.keyCode))
+        var mods: UInt16 = 0
+        if event.modifiers.contains(.shift) { mods |= UInt16(GHOSTTY_MODS_SHIFT) }
+        if event.modifiers.contains(.control) { mods |= UInt16(GHOSTTY_MODS_CTRL) }
+        if event.modifiers.contains(.alt) { mods |= UInt16(GHOSTTY_MODS_ALT) }
+        if event.modifiers.contains(.super) { mods |= UInt16(GHOSTTY_MODS_SUPER) }
+        ghostty_key_event_set_mods(native, mods)
+        let text = event.characters.unicodeScalars.filter { $0.value >= 32 && $0.value != 127 && !(0xF700...0xF8FF).contains($0.value) }
+        let utf8 = Array(String(String.UnicodeScalarView(text)).utf8)
+        // Committed text has no physical key; inventing one truncates IME text in Kitty report-all mode.
+        let pureText = event.keyCode == 0 && event.modifiers.isEmpty && event.unshiftedCharacters == nil
+        let unshifted = pureText ? 0 : (event.unshiftedCharacters ?? event.characters.lowercased()).unicodeScalars.first?.value ?? 0
+        ghostty_key_event_set_unshifted_codepoint(native, unshifted)
+        return utf8.withUnsafeBufferPointer { bytes in
+            ghostty_key_event_set_utf8(native, GhosttyString(ptr: bytes.baseAddress, len: bytes.count))
+            var buffer = [UInt8](repeating: 0, count: max(128, bytes.count + 32))
+            var count = 0
+            var result = ghostty_key_encoder_encode(encoder, native, &buffer, buffer.count, &count)
+            if result == GHOSTTY_OUT_OF_SPACE {
+                buffer = [UInt8](repeating: 0, count: count)
+                result = ghostty_key_encoder_encode(encoder, native, &buffer, buffer.count, &count)
+            }
+            return result == GHOSTTY_SUCCESS ? Data(buffer.prefix(count)) : Data()
         }
     }
 
-    // MARK: - Control Characters
-
-    private func encodeControl(_ characters: String) -> Data {
-        guard let first = characters.first else { return Data() }
-        let scalar = first.asciiValue ?? 0
-        // Ctrl+A = 0x01, Ctrl+Z = 0x1A
-        if scalar >= 0x61 && scalar <= 0x7A { // a-z
-            return Data([scalar - 0x60])
+    private static func key(_ hid: UInt32) -> GhosttyKey {
+        switch hid {
+        case 0x04...0x1D: return GhosttyKey(rawValue: GHOSTTY_KEY_A.rawValue + hid - 0x04)
+        case 0x1E...0x26: return GhosttyKey(rawValue: GHOSTTY_KEY_DIGIT_1.rawValue + hid - 0x1E)
+        case 0x27: return GHOSTTY_KEY_DIGIT_0
+        case 0x28: return GHOSTTY_KEY_ENTER
+        case 0x29: return GHOSTTY_KEY_ESCAPE
+        case 0x2A: return GHOSTTY_KEY_BACKSPACE
+        case 0x2B: return GHOSTTY_KEY_TAB
+        case 0x2C: return GHOSTTY_KEY_SPACE
+        case 0x2D: return GHOSTTY_KEY_MINUS
+        case 0x2E: return GHOSTTY_KEY_EQUAL
+        case 0x2F: return GHOSTTY_KEY_BRACKET_LEFT
+        case 0x30: return GHOSTTY_KEY_BRACKET_RIGHT
+        case 0x31: return GHOSTTY_KEY_BACKSLASH
+        case 0x33: return GHOSTTY_KEY_SEMICOLON
+        case 0x34: return GHOSTTY_KEY_QUOTE
+        case 0x35: return GHOSTTY_KEY_BACKQUOTE
+        case 0x36: return GHOSTTY_KEY_COMMA
+        case 0x37: return GHOSTTY_KEY_PERIOD
+        case 0x38: return GHOSTTY_KEY_SLASH
+        case 0x3A...0x45: return GhosttyKey(rawValue: GHOSTTY_KEY_F1.rawValue + hid - 0x3A)
+        case 0x49: return GHOSTTY_KEY_INSERT
+        case 0x4A: return GHOSTTY_KEY_HOME
+        case 0x4B: return GHOSTTY_KEY_PAGE_UP
+        case 0x4C: return GHOSTTY_KEY_DELETE
+        case 0x4D: return GHOSTTY_KEY_END
+        case 0x4E: return GHOSTTY_KEY_PAGE_DOWN
+        case 0x4F: return GHOSTTY_KEY_ARROW_RIGHT
+        case 0x50: return GHOSTTY_KEY_ARROW_LEFT
+        case 0x51: return GHOSTTY_KEY_ARROW_DOWN
+        case 0x52: return GHOSTTY_KEY_ARROW_UP
+        default: return GHOSTTY_KEY_UNIDENTIFIED
         }
-        if scalar >= 0x41 && scalar <= 0x5A { // A-Z
-            return Data([scalar - 0x40])
-        }
-        // Special control keys.
-        switch first {
-        case "[", "{": return Data([0x1B])
-        case "\\": return Data([0x1C])
-        case "]", "}": return Data([0x1D])
-        case "^", "~": return Data([0x1E])
-        case "_", "/", "?": return Data([0x1F])
-        case "@", " ": return Data([0x00])
-        case "2": return Data([0x00])
-        case "3": return Data([0x1B])
-        case "4": return Data([0x1C])
-        case "5": return Data([0x1D])
-        case "6": return Data([0x1E])
-        case "7": return Data([0x1F])
-        case "8": return Data([0x7F])
-        default:
-            return Data(characters.utf8)
-        }
-    }
-
-    private func encodeLiteralSpecialKey(_ special: String, modifiers: KeyModifiers) -> Data? {
-        guard ["\t", "\r", "\u{1B}", "\u{7F}"].contains(special) else { return nil }
-
-        var data = Data(special.utf8)
-        if modifiers.contains(.alt) {
-            data = Data([0x1B]) + data
-        }
-        return data
-    }
-
-    // MARK: - Modified Special Keys
-
-    private func encodeModifiedSpecial(_ base: String, modifiers: KeyModifiers) -> Data {
-        // xterm modifier encoding: 1 + (shift ? 1 : 0) + (alt ? 2 : 0) + (ctrl ? 4 : 0) + (meta ? 8 : 0)
-        var mod = 1
-        if modifiers.contains(.shift) { mod += 1 }
-        if modifiers.contains(.alt) { mod += 2 }
-        if modifiers.contains(.control) { mod += 4 }
-        if modifiers.contains(.super) { mod += 8 }
-
-        // For SS3 sequences (ESC O X), convert to CSI 1;mod X.
-        if base.hasPrefix("\u{1B}O") && base.count == 3 {
-            let final = base.last!
-            return Data("\u{1B}[1;\(mod)\(final)".utf8)
-        }
-
-        // For CSI sequences (ESC [ ... X or ESC [ num ~), insert modifier.
-        if base.hasPrefix("\u{1B}[") {
-            let body = String(base.dropFirst(2))
-            if body.hasSuffix("~") {
-                // ESC [ num ~ → ESC [ num;mod ~
-                let num = String(body.dropLast())
-                return Data("\u{1B}[\(num);\(mod)~".utf8)
-            } else {
-                // ESC [ X → ESC [ 1;mod X
-                let final = body.last!
-                return Data("\u{1B}[1;\(mod)\(final)".utf8)
-            }
-        }
-
-        return Data(base.utf8)
     }
 }
