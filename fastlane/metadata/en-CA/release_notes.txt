@@ -1,0 +1,5 @@
+- Updated the terminal engine to libghostty-vt 1.0.1.
+- Added Kitty image graphics and animation support over SSH.
+- Improved keyboard input, composed text, and terminal text styling.
+- Added labeled hyperlinks, application cursor shapes, visual bells, and focus reporting.
+- Added synchronized screen updates for applications that support them.

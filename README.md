@@ -141,6 +141,44 @@ Requires Xcode 26.2+, iOS 18+ deployment target.
 xcodebuild build -scheme Spectty -destination 'generic/platform=iOS'
 ```
 
+## Releases
+
+Use Homebrew Ruby (`brew install ruby`) rather than macOS's system Ruby. Add
+`export PATH="/opt/homebrew/opt/ruby/bin:$PATH"` to your shell profile on Apple
+Silicon, then open a new terminal. Install the pinned tools with:
+
+```bash
+bundle config set --local path vendor/bundle
+bundle install
+```
+
+Copy `fastlane/.env.example` to `fastlane/.env.default` and fill in the App Store
+Connect team API key's Key ID, Issuer ID, and absolute `.p8` path. Keep the key
+outside this repository with file permissions `600`. The local credentials and
+build output are ignored by Git. Xcode must be signed into the development team
+for automatic signing.
+
+```bash
+# Run once when preparing a new release; bumps the local build number too.
+bundle exec fastlane prepare version:1.4
+
+# Archive, sign, and upload to TestFlight.
+bundle exec fastlane beta
+
+# Upload screenshots to an unsubmitted App Store draft for preview.
+bundle exec fastlane screenshots
+
+# After testing, submit that exact version/build for App Review.
+bundle exec fastlane release
+```
+
+`beta` checks the latest TestFlight upload and raises the prepared build number
+if needed to avoid reusing an uploaded number. `archive` builds an App Store IPA
+without uploading. Artifacts are written to `build/`. Edit
+`fastlane/metadata/en-CA/release_notes.txt` before submission. `release` preserves
+existing screenshots and submits with manual publication after approval; it
+does not automatically release the app to customers.
+
 ## Contributor acknowledgments
 
 Terminal rendering, keyboard, CJK/IME, mouse tap, port entry, and helper-bar

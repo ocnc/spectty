@@ -1,0 +1,79 @@
+default_platform(:ios)
+
+platform :ios do
+  private_lane :connect_api do
+    app_store_connect_api_key(
+      key_id: ENV.fetch("ASC_KEY_ID"),
+      issuer_id: ENV.fetch("ASC_ISSUER_ID"),
+      key_filepath: ENV.fetch("ASC_KEY_FILE"),
+      duration: 1200
+    )
+  end
+
+  desc "Set a release version and increment the local build number"
+  lane :prepare do |options|
+    version = options.fetch(:version)
+    build = Integer(get_build_number(xcodeproj: "Spectty.xcodeproj"), 10) + 1
+    increment_version_number(version_number: version, xcodeproj: "Spectty.xcodeproj")
+    increment_build_number(build_number: build, skip_info_plist: true, xcodeproj: "Spectty.xcodeproj")
+  end
+
+  desc "Archive and export an App Store IPA using this Mac's Xcode signing account"
+  lane :archive do
+    build_app(
+      project: "Spectty.xcodeproj",
+      scheme: "Spectty",
+      configuration: "Release",
+      export_method: "app-store",
+      export_team_id: "T3755V9556",
+      export_options: { signingStyle: "automatic" },
+      xcargs: "-allowProvisioningUpdates",
+      export_xcargs: "-allowProvisioningUpdates",
+      archive_path: "build/Spectty.xcarchive",
+      output_directory: "build"
+    )
+  end
+
+  desc "Choose an unused build number, archive, and upload to TestFlight"
+  lane :beta do
+    api_key = connect_api
+    local_build = Integer(get_build_number(xcodeproj: "Spectty.xcodeproj"), 10)
+    remote_build = latest_testflight_build_number(api_key: api_key, initial_build_number: 0)
+    increment_build_number(
+      build_number: [local_build, remote_build + 1].max,
+      skip_info_plist: true,
+      xcodeproj: "Spectty.xcodeproj"
+    )
+    archive
+    upload_to_testflight(api_key: api_key, skip_waiting_for_build_processing: true)
+  end
+
+  desc "Upload screenshots to the version draft for preview without submitting"
+  lane :screenshots do
+    upload_to_app_store(
+      api_key: connect_api,
+      app_version: get_version_number(xcodeproj: "Spectty.xcodeproj", target: "Spectty"),
+      screenshots_path: "fastlane/screenshots",
+      skip_binary_upload: true,
+      skip_metadata: true,
+      overwrite_screenshots: true,
+      submit_for_review: false,
+      run_precheck_before_submit: false,
+      force: true
+    )
+  end
+
+  desc "Submit the current uploaded version/build for review, with manual publication"
+  lane :release do
+    upload_to_app_store(
+      api_key: connect_api,
+      app_version: get_version_number(xcodeproj: "Spectty.xcodeproj", target: "Spectty"),
+      build_number: get_build_number(xcodeproj: "Spectty.xcodeproj"),
+      skip_binary_upload: true,
+      skip_screenshots: true,
+      submit_for_review: true,
+      automatic_release: false,
+      precheck_include_in_app_purchases: false
+    )
+  end
+end
