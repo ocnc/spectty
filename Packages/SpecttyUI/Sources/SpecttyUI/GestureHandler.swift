@@ -47,6 +47,8 @@ public final class GestureHandler: NSObject, UIGestureRecognizerDelegate {
     private var initialFontSize: CGFloat = 14
     private var currentSelectionStart: (row: Int, col: Int)?
     private var currentSelection: TerminalSelection?
+    /// Where the current scroll drag first touched the terminal.
+    private var dragStart: CGPoint?
     private let selectionFeedback = UIImpactFeedbackGenerator(style: .light)
 
     public init(metalView: TerminalMetalView, emulator: any TerminalEmulator) {
@@ -146,9 +148,7 @@ public final class GestureHandler: NSObject, UIGestureRecognizerDelegate {
         if metalView.isShowingLiveScreen,
            modes.contains(.mouseSGR),
            modes.contains(.mouseButton) || modes.contains(.mouseAny) {
-            let coord = metalView.gridCoordinate(for: point)
-            let x = min(coord.col + 1, emulator.state.columns)
-            let y = min(coord.row + 1, emulator.state.rows)
+            let (x, y) = mouseCell(at: point, in: metalView, emulator: emulator)
             // Keep the click atomic in the existing outbound queue.
             onMouseEvent?(Data("\u{1B}[<0;\(x);\(y)M\u{1B}[<0;\(x);\(y)m".utf8))
             metalView.becomeFirstResponder()
@@ -161,40 +161,58 @@ public final class GestureHandler: NSObject, UIGestureRecognizerDelegate {
     // MARK: - Pan (Scroll)
 
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
-        guard let metalView = metalView, let emulator = emulator else { return }
-
+        guard let metalView else { return }
+        let location = gesture.location(in: metalView)
         let translation = gesture.translation(in: metalView)
-        let cellHeight = metalView.cellSize.height
+        if handleDrag(gesture.state, at: location, translation: translation) {
+            gesture.setTranslation(.zero, in: metalView)
+        }
+    }
+
+    /// Scrolls by the whole lines of a one-finger drag. Returns true when it used the
+    /// translation, which the caller then resets.
+    func handleDrag(_ state: UIGestureRecognizer.State, at location: CGPoint, translation: CGPoint) -> Bool {
+        guard let metalView, let emulator else { return false }
+        switch state {
+        case .began:
+            // UIKit recognizes a pan after the finger has moved; keep where it first touched.
+            dragStart = CGPoint(x: location.x - translation.x, y: location.y - translation.y)
+            return false
+        case .changed:
+            break
+        default:
+            dragStart = nil
+            return false
+        }
+
+        let lines = Int(translation.y / metalView.cellSize.height)
+        guard lines != 0 else { return false }
 
         // Check if alternate screen (tmux/vim) — send mouse scroll events instead.
-        if emulator.state.modes.contains(.alternateScreen) && emulator.state.modes.contains(.mouseAny) {
-            // In alternate screen with mouse tracking, send scroll events.
-            if gesture.state == .changed {
-                let lines = Int(translation.y / cellHeight)
-                if lines != 0 {
-                    // Send mouse scroll button events.
-                    let button: UInt8 = lines > 0 ? 64 : 65 // Up or Down scroll
-                    let count = abs(lines)
-                    for _ in 0..<count {
-                        if emulator.state.modes.contains(.mouseSGR) {
-                            let data = Data("\u{1B}[<\(button);1;1M".utf8)
-                            onMouseEvent?(data)
-                        }
-                    }
-                    gesture.setTranslation(.zero, in: metalView)
+        let modes = emulator.state.modes
+        if modes.contains(.alternateScreen) && modes.contains(.mouseAny) {
+            if modes.contains(.mouseSGR) {
+                // Report the wheel where the drag started: programs scroll what is under the pointer.
+                let (x, y) = mouseCell(at: dragStart ?? location, in: metalView, emulator: emulator)
+                let button = lines > 0 ? 64 : 65 // Up or Down scroll
+                let report = Data("\u{1B}[<\(button);\(x);\(y)M".utf8)
+                for _ in 0..<abs(lines) {
+                    onMouseEvent?(report)
                 }
             }
-            return
+            return true
         }
 
         // Normal screen: scroll through scrollback buffer.
-        if gesture.state == .changed {
-            let lines = Int(translation.y / cellHeight)
-            if lines != 0 {
-                metalView.scrollBy(lines)
-                gesture.setTranslation(.zero, in: metalView)
-            }
-        }
+        metalView.scrollBy(lines)
+        return true
+    }
+
+    /// The 1-based cell under a point, as mouse reports address it.
+    private func mouseCell(at point: CGPoint, in metalView: TerminalMetalView, emulator: any TerminalEmulator) -> (x: Int, y: Int) {
+        let coord = metalView.gridCoordinate(for: point)
+        let state = emulator.state
+        return (min(coord.col + 1, state.columns), min(coord.row + 1, state.rows))
     }
 
     // MARK: - Pinch to Zoom
