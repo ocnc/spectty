@@ -48,7 +48,42 @@ final class DragScrollTests: XCTestCase {
         XCTAssertEqual(terminal.sent, ["\u{1b}[<65;3;2M", "\u{1b}[<65;12;9M"])
     }
 
-    @MainActor func testDragOnNormalScreenScrollsLocalScrollback() throws {
+    @MainActor func testDragReportsWheelWheneverTheProgramTracksTheMouse() throws {
+        let modes = [
+            // Over mosh: no alternate screen, and only the last mouse mode herdr set.
+            "mosh": "\u{1b}[?1003h\u{1b}[?1006h",
+            // tmux and vim: button tracking, without any-motion tracking.
+            "tmux": "\u{1b}[?1049h\u{1b}[?1000h\u{1b}[?1002h\u{1b}[?1006h",
+        ]
+        for (program, setup) in modes {
+            let terminal = try DragTerminal()
+            defer { terminal.close() }
+            terminal.emulator.feed(Data(setup.utf8))
+            let line = terminal.view.cellSize.height
+            let start = terminal.center(column: 7, row: 3)
+            _ = terminal.handler.handleDrag(.began, at: start, translation: .zero)
+            XCTAssertTrue(terminal.handler.handleDrag(.changed, at: start.movedDown(-line), translation: CGPoint(x: 0, y: -line)))
+            XCTAssertEqual(terminal.sent, ["\u{1b}[<65;7;3M"], program)
+        }
+    }
+
+    @MainActor func testDragScrollsLocallyWhileScrolledBack() throws {
+        let terminal = try DragTerminal()
+        defer { terminal.close() }
+        terminal.emulator.feed(Data(String(repeating: "line\r\n", count: 40).utf8))
+        terminal.emulator.feed(Data("\u{1b}[?1000h\u{1b}[?1006h".utf8))
+        terminal.view.scrollBy(3)
+        let line = terminal.view.cellSize.height
+        let start = terminal.center(column: 10, row: 5)
+
+        // Like a tap, a drag stays local until the live screen shows again.
+        _ = terminal.handler.handleDrag(.began, at: start, translation: .zero)
+        XCTAssertTrue(terminal.handler.handleDrag(.changed, at: start.movedDown(-line), translation: CGPoint(x: 0, y: -line)))
+        XCTAssertTrue(terminal.sent.isEmpty)
+        XCTAssertFalse(terminal.view.isShowingLiveScreen)
+    }
+
+    @MainActor func testDragWithoutMouseTrackingScrollsLocalScrollback() throws {
         let terminal = try DragTerminal()
         defer { terminal.close() }
         terminal.emulator.feed(Data(String(repeating: "line\r\n", count: 40).utf8))

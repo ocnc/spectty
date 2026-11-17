@@ -143,11 +143,8 @@ public final class GestureHandler: NSObject, UIGestureRecognizerDelegate {
 
     func handleTap(at point: CGPoint) {
         guard let metalView, let emulator else { return }
-        let modes = emulator.state.modes
         guard metalView.terminalContentRect.contains(point) else { return }
-        if metalView.isShowingLiveScreen,
-           modes.contains(.mouseSGR),
-           modes.contains(.mouseButton) || modes.contains(.mouseAny) {
+        if programTracksMouse(in: metalView, emulator: emulator) {
             let (x, y) = mouseCell(at: point, in: metalView, emulator: emulator)
             // Keep the click atomic in the existing outbound queue.
             onMouseEvent?(Data("\u{1B}[<0;\(x);\(y)M\u{1B}[<0;\(x);\(y)m".utf8))
@@ -188,24 +185,30 @@ public final class GestureHandler: NSObject, UIGestureRecognizerDelegate {
         let lines = Int(translation.y / metalView.cellSize.height)
         guard lines != 0 else { return false }
 
-        // Check if alternate screen (tmux/vim) — send mouse scroll events instead.
-        let modes = emulator.state.modes
-        if modes.contains(.alternateScreen) && modes.contains(.mouseAny) {
-            if modes.contains(.mouseSGR) {
-                // Report the wheel where the drag started: programs scroll what is under the pointer.
-                let (x, y) = mouseCell(at: dragStart ?? location, in: metalView, emulator: emulator)
-                let button = lines > 0 ? 64 : 65 // Up or Down scroll
-                let report = Data("\u{1B}[<\(button);\(x);\(y)M".utf8)
-                for _ in 0..<abs(lines) {
-                    onMouseEvent?(report)
-                }
+        // A program that tracks the mouse gets wheel presses, as it gets taps.
+        if programTracksMouse(in: metalView, emulator: emulator) {
+            // Report the wheel where the drag started: programs scroll what is under the pointer.
+            let (x, y) = mouseCell(at: dragStart ?? location, in: metalView, emulator: emulator)
+            let button = lines > 0 ? 64 : 65 // Up or Down scroll
+            let report = Data("\u{1B}[<\(button);\(x);\(y)M".utf8)
+            for _ in 0..<abs(lines) {
+                onMouseEvent?(report)
             }
             return true
         }
 
-        // Normal screen: scroll through scrollback buffer.
+        // Otherwise scroll through the scrollback buffer.
         metalView.scrollBy(lines)
         return true
+    }
+
+    /// Whether the live screen shows a program that wants mouse reports, in the SGR encoding
+    /// Spectty sends. Over mosh the alternate screen is never set, so it is not required.
+    private func programTracksMouse(in metalView: TerminalMetalView, emulator: any TerminalEmulator) -> Bool {
+        let modes = emulator.state.modes
+        return metalView.isShowingLiveScreen
+            && modes.contains(.mouseSGR)
+            && (modes.contains(.mouseButton) || modes.contains(.mouseAny))
     }
 
     /// The 1-based cell under a point, as mouse reports address it.
